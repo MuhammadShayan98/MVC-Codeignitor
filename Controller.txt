@@ -1,0 +1,4197 @@
+
+                                                       application\controllers\admin\Dashboard.php (Controller)
+
+
+<?php
+
+
+class Dashboard extends CI_Controller
+{
+	public function __construct()
+	{
+		parent::__construct();
+
+		$this->load->model('admin');
+		$this->load->model('Services');
+		$this->load->helper('form');
+		$this->load->model('Common');
+		$this->load->library('pagination');
+		$this->load->helper('date');
+		$this->load->helper('utility');
+		$this->load->library('encrypt');
+		$this->load->library('form_validation');
+		$this->load->helper('security');
+		$this->load->helper('url');
+		$this->load->library('m_pdf');
+
+		if (!$this->session->userdata('isLoggedIn')) {
+			redirect('/User_admin');
+		}
+
+		$roles = $this->session->userdata('roles');
+
+		if (empty($roles)) {
+			redirect('/Journals');
+		} else {
+			if (!in_array('admin', $roles)) {
+				redirect('/Login/getRedirectionPage');
+			}
+		}
+	}
+
+	/**
+	 * This is the controller method that drives the application.
+	 * After a user logs in, show_main() is called and the main
+	 * application screen is set up.
+	 */
+	public function show_dashboard()
+	{
+		// Get some data from the user's session
+		$user_id = $this->session->userdata('id');
+		$is_admin = $this->session->userdata('isAdmin');
+
+		$data['is_admin'] = $is_admin;
+		$data['email'] = $this->session->userdata('email');
+		$data['name'] = $this->session->userdata('name');
+		$data['avatar'] = $this->session->userdata('avatar');
+		$data['field_of_expertise'] = $this->session->userdata('field_of_expertise');
+		$this->load->template('admin/dashboard', $data);
+	}
+
+	public function opt_Services()
+	{
+		$this->load->template('opt_services');
+	}
+
+	public function opt_ServicesSearch($ref)
+	{
+		if (empty($ref)) {
+			$refrence_number = trim($this->input->post('reference_number'));
+		} else {
+			$refrence_number = $ref;
+		}
+		$search = $this->input->post('btn_search_journal');
+		$manuscript_id = $data['manuscript_id_data'] = $this->Manuscript->getManuscriptByReferenceNumber($refrence_number);
+		$data['manuscript_id1'] = $manuscript_id->manuscript_id;
+		$data['reference_number'] = $manuscript_id->reference_number;
+		$data['result'] = $this->Services->getOptServicesListByManuscriptId($data['manuscript_id1']);
+		$data['result1'] = $this->Services->getServicesList();
+		if (isset($search) && $refrence_number != '' && empty($data['manuscript_id1'])) {
+			$this->session->set_flashdata('norecord', '<div class="alert alert-danger"  role="alert">Record not found! <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span>
+		</button></div>');
+		}
+		$this->load->template('opt_services', $data);
+	}
+
+
+	public function opt_ServicesDelete($manuscript_id, $service_id)
+	{
+		$m_id = $this->Manuscript->getManuscriptById($manuscript_id);
+		$ref = $m_id->reference_number;
+		$this->Services->DeleteServicesByManuscriptId($manuscript_id, $service_id);
+
+		$this->session->set_flashdata('success_msg', 'Successfully Deleted.');
+
+		redirect('/admin/Dashboard/opt_ServicesSearch/' . $ref);
+	}
+
+	public function Add_opt_Services($manuscript_id)
+	{
+		$service_id = $this->input->post("s_id");
+		$manuscript_details = $this->Manuscript->getManuscriptById($manuscript_id);
+		$journal_id = $manuscript_details->journal_id;
+		$ref = $manuscript_details->reference_number;
+		$j_price = $this->Services->getPrice($journal_id, $service_id);
+		$price = $j_price->service_journal_price;
+
+		$insert = array(
+			"service_id" =>  $service_id,
+			"manuscript_id" => $manuscript_id,
+			"sprice" => $price
+		);
+
+
+		$result = $this->Services->add_optServices($insert, $manuscript_id, $service_id);
+		if (!empty($result)) {
+			$this->session->set_flashdata('success_msg', 'Successfully Added.');
+		} else {
+			$this->session->set_flashdata('error_msg', 'Service already exists');
+		}
+
+		redirect('/admin/Dashboard/opt_ServicesSearch/' . $ref);
+	}
+
+	public function opt_Services_Update($m_service_id, $manuscript_id)
+	{
+		$service_price = $this->input->post("price");
+		$m_id = $this->Manuscript->getManuscriptById($manuscript_id);
+		$ref = $m_id->reference_number;
+		$update = array(
+			"m_service_id" => $m_service_id,
+			"sprice" => $service_price
+		);
+
+		$result = $this->Services->UpdateManuscriptServiceItem($update);
+		$this->session->set_flashdata('success_msg', 'Successfully Updated.');
+
+		redirect('/admin/Dashboard/opt_ServicesSearch/' . $ref);
+	}
+
+
+	public function SendEmailToAuthors($manuscript_id)
+	{
+
+		$data['ms'] = $ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		$journal = $this->Journal->getJournalDataById($ms->journal_id);
+		$added_by_info = $this->User->get_user_info($ms->added_by);
+		$manuscript_authors = $this->Author->GetManuscriptPrincipalAuthor($manuscript_id);
+		$template = $this->EmailTemplate->GetEmailTemplate($ms->journal_id, 23);
+		$ref_number = $ms->reference_number;
+
+		// 
+		$data['from'] = $from = $journal->journal_principal_contact;
+		$temp_to = $this->input->post('to');
+
+
+		if ($temp_to) {
+			$data['to'] = $to = $temp_to;
+		} else {
+			$data['to'] = $to = $manuscript_authors->email_address;
+		}
+
+		$temp_cc = $this->input->post('cc');
+		if ($temp_cc) {
+			$data['cc'] = $cc = $this->input->post('cc');
+		} else {
+			$data['cc'] = $cc = $journal->CC;
+			if ($template[0]->cc) {
+				$cc .= $template[0]->cc;
+			}
+		}
+
+		$temp_bcc = $this->input->post('bcc');
+		if ($temp_bcc) {
+			$data['bcc'] = $bcc = $this->input->post('bcc');
+		} else {
+			$data['bcc'] = $bcc = $journal->BCC;
+			if ($template[0]->bcc) {
+				$bcc .= $template[0]->bcc;
+			}
+		}
+		//$subject         = str_replace('{$reference_number}', $ms->reference_number, $template[0]->subject);
+		//$data['subject'] = $subject = str_replace('{$journal_code}', $journal->journal_code, $subject);
+		if ($this->input->post('email_subject')) {
+			$data['subject'] = $subject = $this->input->post('email_subject');
+		} else {
+			$data['subject'] = $subject = "Unsubmitted Articles on JMS";
+		}
+		$manager_name = $this->session->userdata('name');
+		$email_body = $this->input->post('email_body');
+		/*if ($email_body) {
+			                $data['message'] = $message = $this->input->post('email_body');
+			            } else {
+			                $data['message'] = $message = $template[0]->email_body;
+		*/
+
+		$message = 'Dear Dr. {@authorName}<br><br>With reference to your submission <b>"{@title}"</b> to the journal <b>"{@journal_title}"</b>, it has been observed that you have left your article incompletely submitted on our online system (JMS). Therefore, you are requested to kindly indicate the problem arising during submission of your article before leaving the paper incompletely submitted.<br><br>The error will be rectified and you may find a new log in id and password to continue with your submission.<br><br><br>Regards,<br><br>
+                {@managername}<br>
+                {@journal_signature}';
+
+		$params['{@title}'] = $ms->title;
+		$params['{@authorName}'] = ucwords($added_by_info->first_name) . ' ' . ucwords($added_by_info->last_name);
+		$params['{@managername}'] = $manager_name;
+		$params['{@journal_title}'] = $journal->journal_title;
+		$params['{@journal_signature}'] = $journal->journal_signature;
+
+		foreach ($params as $key => $val) {
+			$message = str_replace($key, $val, $message);
+		}
+
+		$data['email_body'] = $message;
+
+		$receiver_name = '';
+
+		$manager_name = $journal->journal_principal_contact;
+
+		if ($this->input->post('send_email') == false) {
+			$this->load->template('admin/SendEmail', $data);
+		} else {
+			$send_email = $this->input->post('send_email');
+
+			if ($send_email) {
+				if ($send_email) {
+
+					$sent = SendSmtpMail($to, $from, $subject, $message, $receiver_name, $manager_name, $cc, $bcc);
+
+					if ($sent) {
+						// mail sent
+						$email_data = array(
+							'manuscript_id' => $manuscript_id,
+							'activity_id' => 0,
+							'to_email' => $this->input->post('to'),
+							'cc_email' => $this->input->post('cc'),
+							'bcc_email' => $this->input->post('bcc'),
+							'email_subject' => "Unsubmitted-" . $this->input->post('email_subject'),
+							'email_body' => $message,
+							'sender' => $this->session->userdata('id'),
+							'created_on' => time(),
+							'created_by' => $this->session->userdata('id'),
+							'updated_on' => time(),
+							'updated_by' => $this->session->userdata('id'),
+							'ip' => ip2long($this->input->ip_address()),
+						);
+
+
+
+						$email_log_id = $this->EmailTemplate->SaveEmailPreview($email_data);
+						$this->session->set_flashdata('norecord', '<div class="alert alert-success text-center">Your mail has been sent successfully!</div>');
+						redirect('/admin/Dashboard/opt_ServicesSearch/' . $ref_number);
+					} else {
+
+						//error
+						$this->session->set_flashdata('norecord', '<div class="alert alert-danger text-center">There is error in sending mail! Please try again later</div>');
+						redirect('/admin/Dashboard/opt_ServicesSearch/' . $ref_number);
+					}
+				}
+			}
+		}
+	}
+	public function manage_journals()
+	{
+		// Get some data from the user's session
+		$user_id = $this->session->userdata('id');
+		$is_admin = $this->session->userdata('isAdmin');
+
+		$data['is_admin'] = $is_admin;
+		$data['email'] = $this->session->userdata('email');
+		$data['name'] = $this->session->userdata('name');
+		$data['avatar'] = $this->session->userdata('avatar');
+		$data['field_of_expertise'] = $this->session->userdata('field_of_expertise');
+
+		$journal_search = '';
+		$letter = '';
+		$data['journals'] = $this->Journal->getJournalList($journal_search, $letter);
+
+		$this->load->template('admin/manageJournals', $data);
+	}
+
+	public function search_journal_templates()
+	{
+		$journal_id = $this->input->post('jm_journal_names');
+		redirect('/admin/Dashboard/Journal_templates/' . trim($journal_id));
+	}
+
+	public function search_journal_templates_article_type_wise()
+	{
+		$journal_id = $this->input->post('jm_journal_names');
+		redirect('/admin/Dashboard/Journal_templates_article_type_wise/' . trim($journal_id));
+	}
+
+	public function Journal_templates($journal_id = '')
+	{
+		$journals = $this->Journal->getAllJournals();
+		$data['journals'] = $journals;
+
+		if (!empty($journal_id)) {
+			$data['journal_templates'] = $this->Journal->getJournalLetter($journal_id);
+			$data['activity'] = $this->Journal->getActivity();
+			$data['letters'] = $this->Journal->getLetter();
+		}
+		$data['journal_id'] = $journal_id;
+
+		$this->load->template('admin/journal_letter', $data);
+	}
+
+	public function Journal_templates_article_type_wise($journal_id = '')
+	{
+		$journals = $this->Journal->getAllJournals();
+		$data['journals'] = $journals;
+		// var_dump($journals);die();
+		if (!empty($journal_id)) {
+			$data['journal_templates'] = $this->Journal->getJournalLetterArticleTypeWise($journal_id);
+			$data['activity'] = $this->Journal->getActivity();
+			$data['letters'] = $this->Journal->getLetterArticleTypeWise();
+			// var_dump($data['letters'] );die();
+			// $data['article_types']      = $this->Journal->getArticleType();
+		}
+		// var_dump($data['article_types']  );die();
+		$data['journal_id'] = $journal_id;
+
+		$this->load->template('admin/journal_letter_article_type_wise', $data);
+	}
+
+	public function save_journal_template()
+	{
+		$journal_id = $this->input->post('journal_id');
+		$activity_id = $this->input->post('activity_id');
+		$letter_id = $this->input->post('letter');
+		$cc = $this->input->post('cc');
+		$bcc = $this->input->post('bcc');
+
+		$assigned_template_id = $this->Journal->deletejournalTemplates($journal_id);
+
+		foreach ($activity_id as $key => $act) {
+			$data['journal_id'] = $journal_id;
+			$data['activity_id'] = $act;
+			$data['letter_id'] = $letter_id[$key];
+			$data['cc'] = trim($cc[$key]);
+			$data['bcc'] = trim($bcc[$key]);
+			$data['created_on'] = time();
+			$data['created_by'] = $this->session->userdata('id');
+			$data['updated_on'] = time();
+			$data['updated_by'] = $this->session->userdata('id');
+			$data['ip'] = ip2long($this->input->ip_address());
+			$data['status'] = "A";
+
+			$letter_id_exist = $letter_id[$key];
+
+			if (!empty($letter_id_exist)) {
+				$assigned_template_id = $this->Journal->insertjournalTemplates($data);
+			}
+		}
+		redirect('/admin/Dashboard/Journal_templates/' . trim($journal_id));
+	}
+
+	public function save_journal_template_article_type_wise()
+	{
+		$journal_id = $this->input->post('journal_id');
+		$activity_id = $this->input->post('activity_id');
+		$letter_id = $this->input->post('letter');
+		$cc = $this->input->post('cc');
+		$bcc = $this->input->post('bcc');
+
+		$assigned_template_id = $this->Journal->deletejournalTemplatesArticleTypeWise($journal_id);
+
+		foreach ($activity_id as $key => $act) {
+			$data['journal_id'] = $journal_id;
+			$data['activity_id'] = $act;
+
+			$test = explode("_", $letter_id[$key]);
+
+			$letter_id_f = $test[0];
+			$article_type_id_f = $test[1];
+
+			$data['letter_id'] = $letter_id_f;
+			$data['cc'] = trim($cc[$key]);
+			$data['bcc'] = trim($bcc[$key]);
+			$data['article_type_id'] = $article_type_id_f;
+			$data['created_on'] = time();
+			$data['created_by'] = $this->session->userdata('id');
+			$data['updated_on'] = time();
+			$data['updated_by'] = $this->session->userdata('id');
+			$data['ip'] = ip2long($this->input->ip_address());
+			$data['status'] = "A";
+
+			$letter_id_exist = $letter_id_f;
+
+			if (!empty($letter_id_exist)) {
+				$assigned_template_id = $this->Journal->insertjournalTemplatesArticleTypeWise($data);
+			}
+		}
+		redirect('/admin/Dashboard/Journal_templates_article_type_wise/' . trim($journal_id));
+	}
+
+	public function WobblyManagement()
+	{
+		$user_id = $this->session->userdata('id');
+
+		$journals = $this->admin->getAllWobblyJournals();
+		$data['journals'] = $journals;
+		//          $data['jm_journals'] = $this->Journal->getAssignJournals($user_id);
+		$data['wobbly_category'] = $this->Journal->getWobblyCategoryList();
+
+		$this->load->template('admin/WobblyManagement', $data);
+	}
+
+	public function add_journal_form()
+	{
+		$data['article_types'] = $this->Article->getArticleTypeList();
+		$this->load->template('admin/addJournalForm', $data);
+	}
+
+	public function edit_journal_form($args)
+	{
+		// Get some data from the user's session
+		$data['journal'] = $this->Journal->getJournalDataByCode($args);
+
+		$targetPath = __ROOT_PATH__ . 'document';
+
+		if (is_dir($targetPath)) {
+			$dir = __ROOT_PATH__ . '/document/feeForm/' . strtolower($args);
+			$ffs = scandir($dir);
+			foreach ($ffs as $ff) {
+				if ($ff != '.' && $ff != '..') {
+					$fee_form[] = $ff;
+					$fee_form_path[] = $dir . '/' . $ff;
+				}
+			}
+		}
+
+		$data['fee_form'] = $fee_form;
+		$data['fee_form_path'] = $fee_form_path;
+
+		if (is_dir($targetPath)) {
+			$dir = __ROOT_PATH__ . '/document/coverLetter/' . strtolower($args);
+			$ffs = scandir($dir);
+			foreach ($ffs as $ff) {
+				if ($ff != '.' && $ff != '..') {
+					$cover_letter[] = $ff;
+					$cover_letter_path[] = $dir . '/' . $ff;
+				}
+			}
+		}
+
+		$data['cover_letter'] = $cover_letter;
+		$data['cover_letter_path'] = $cover_letter_path;
+
+		$dir = __ROOT_PATH__ . 'document/quickTrack/journal/';
+
+		if (file_exists($dir . strtoupper($args) . '_QuickTrack.docx')) {
+			$quickTrack[] = strtoupper($args) . '_QuickTrack.docx';
+			$quickTrack_path[] = $dir . '/' . strtoupper($args) . '_QuickTrack.docx';
+		}
+
+		$data['quickTrackForm'] = $quickTrack;
+		$data['quickTrack_path'] = $quickTrack_path;
+
+		$journal_image_path = __ROOT_PATH__ . 'assets/images/journals';
+		$journal_image_exist = __ROOT_PATH__ . 'assets/images/journals/' . $data['journal'][0]->journal_image;
+
+		if (file_exists($journal_image_exist)) {
+			$data['journal_image'] = $data['journal'][0]->journal_image;
+			$data['journal_image_path'] = $journal_image_path . '/' . $data['journal'][0]->journal_image;
+		}
+
+		$data['article_types'] = $this->Article->getArticleTypeList();
+
+		$this->load->template('admin/editJournalForm', $data);
+	}
+
+	public function search_journal()
+	{
+		$this->load->model('common');
+
+		$user_id = $this->session->userdata('id');
+		$is_admin = $this->session->userdata('isAdmin');
+
+		$btn_search_journal = $this->input->get_post('btn_search_journal');
+		if ($btn_search_journal) {
+			$search = array(
+				'journal_title' => trim($this->input->get_post('search_journal_title')),
+				'journal_code' => trim($this->input->get_post('search_journal_code')),
+				'journal_type' => trim($this->input->get_post('search_journal_type')),
+			);
+
+			$data['journals'] = $this->Journal->searchJournals($search);
+			$data['search_open'] = true;
+		} else {
+			redirect('/admin/Dashboard/manage_journals');
+		}
+
+		$data['is_admin'] = $is_admin;
+		$data['email'] = $this->session->userdata('email');
+		$data['name'] = $this->session->userdata('name');
+		$data['avatar'] = $this->session->userdata('avatar');
+		$data['field_of_expertise'] = $this->session->userdata('field_of_expertise');
+		$data['search_filter'] = $search;
+
+		$this->load->template('admin/manageJournals', $data);
+	}
+
+	public function UnsubmittedManuscripts($sentitem = "")
+	{
+		$user_id = $this->session->userdata('id');
+
+		$search_ms = $this->input->post('search_ms');
+		$journal_id = $this->input->post('journal_id');
+		$to_date = $this->input->post('to_date');
+		$from_date = $this->input->post('from_date');
+		$manuscript_type = $this->input->post('manuscript_type');
+		$search_export = $this->input->post('search_export');
+
+		if (!empty($to_date)) {
+			$data['to_date'] = $to_date;
+			$start_date = strtotime($to_date);
+		} else {
+			$to_date = null;
+		}
+		if (!empty($from_date)) {
+			$data['from_date'] = $from_date;
+			$end_date = strtotime($from_date);
+		} else {
+			$from_date = null;
+		}
+		if (!empty($manuscript_type)) {
+			$data['manuscript_type'] = $manuscript_type;
+		} else {
+			$manuscript_type = null;
+		}
+		if (!empty($journal_id)) {
+			$data['journal_id'] = $journal_id;
+		} else {
+			$journal_id = null;
+		}
+		if (!empty($sentitem)) {
+			$sentitem = "sentitems";
+		}
+		if (!empty($search_export)) {
+			$exportUnsubmittedManuscripts = $this->Manuscript->GetAllUnSubmittedManuscriptsReport($manuscript_type, $journal_id, $start_date, $end_date, '', '', '', $sentitem);
+			$this->ExportUnsubmittedManuscripts($exportUnsubmittedManuscripts);
+		}
+
+		$pagename = base_url('/admin/Dashboard/UnsubmittedManuscripts/');
+		$config = PaginationConfiguration($pagename);
+		$config['per_page'] = 50;
+		$page = ($this->uri->segment(4)) ? $this->uri->segment(4) : 0;
+		$page = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+
+		$config['total_rows'] = $this->Manuscript->GetAllUnSubmittedManuscriptsReport($manuscript_type, $journal_id, $start_date, $end_date, 'count', '', '', $sentitem);
+
+		$config['uri_segment'] = 4;
+		$choice = $config['total_rows'] / $config['per_page'];
+		$config['num_links'] = round($choice);
+		$this->pagination->initialize($config);
+		$data['pagination'] = $this->pagination->create_links();
+		$UnsubmittedManuscripts = $this->Manuscript->GetAllUnSubmittedManuscriptsReport($manuscript_type, $journal_id, $start_date, $end_date, '', $config['per_page'], $page, $sentitem);
+
+		//$UnsubmittedManuscripts  =  $this->Manuscript->GetAllUnSubmittedManuscriptsReport();
+		$data['UnsubmittedManuscripts'] = $UnsubmittedManuscripts;
+		$journals = $this->Journal->getAllJournals();
+		$data['journals'] = $journals;
+
+		$this->load->template('admin/UnsubmittedManuscripts', $data);
+	}
+
+	public function ExportUnsubmittedManuscripts($UnsubmittedManuscripts)
+	{
+		$table = '<table border="1">
+                            <thead>
+                                <tr>
+                                    <th  width="200">Reference Number</th>
+                                    <th width="100">Updated Date</th>
+                                    <th width="400">Title</th>
+                                    <th width="50">Type</th>
+                                    <th width="200">Submitted By</th>
+                                    <th width="200">Submitted By Email</th>
+                                    <th width="100">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>';
+		if (!empty($UnsubmittedManuscripts)) {
+			foreach ($UnsubmittedManuscripts as $manuscript_row) {
+				if ($manuscript_row->submission_step == 1) {
+					$submission_step = "Submission Step 1";
+				}
+				if ($manuscript_row->submission_step == 2) {
+					$submission_step = "Submission Step 2";
+				}
+				if ($manuscript_row->submission_step == 3) {
+					$submission_step = "Submission Step 3";
+				}
+				if ($manuscript_row->submission_step == 4) {
+					$submission_step = "Submission Step 4";
+				}
+				if ($manuscript_row->manuscript_type == 'M') {
+					$type = 'Manuscript';
+				}
+				if ($manuscript_row->manuscript_type == 'A') {
+					$type = 'Abstract';
+				}
+				if ($manuscript_row->manuscript_type == 'P') {
+					$type = 'Proposal';
+				}
+				$table .= ' <tr>
+                                    <td>' . $manuscript_row->reference_number . '</td>
+                                    <td>' . strftime('%b %d,%Y', $manuscript_row->created_on) . '</td>
+                                    <td>' . $manuscript_row->title . '</td>
+                                    <td>' . $type . '</td>
+                                    <td>' . $manuscript_row->first_name . ' ' . $manuscript_row->last_name . '</td>
+                                    <td>' . $manuscript_row->email . '</td>
+                                    <td>' . $submission_step . '</td>
+                                </tr>';
+			}
+		}
+		$table .= '</tbody>
+                  </table>';
+
+		header("Content-type: application/vnd.ms-excel");
+		header("Content-Disposition: attachment; filename=export_unsubmitted_report.xls");
+		print $table;
+		exit;
+	}
+
+	public function SendEmailToAuthor($param)
+	{
+		$d_str = $this->encrypt->decode($param);
+		$data['param'] = $param;
+		list($manuscript_id, $author_email) = explode("||", $d_str);
+		$data['ms'] = $ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		$journal = $this->Journal->getJournalDataById($ms->journal_id);
+		$added_by_info = $this->User->get_user_info($ms->added_by);
+		$manuscript_authors = $this->Author->GetManuscriptPrincipalAuthor($manuscript_id);
+
+		$template = $this->EmailTemplate->GetEmailTemplate($ms->journal_id, 23);
+
+		$data['from'] = $from = $journal->journal_principal_contact;
+		$temp_to = $this->input->post('to');
+		if ($temp_to) {
+			$data['to'] = $to = $this->input->post('to');
+		} else {
+			$data['to'] = $to = $author_email;
+		}
+		$temp_cc = $this->input->post('cc');
+		if ($temp_cc) {
+			$data['cc'] = $cc = $this->input->post('cc');
+		} else {
+			$data['cc'] = $cc = $journal->CC;
+			if ($template[0]->cc) {
+				$cc .= $template[0]->cc;
+			}
+		}
+
+		$temp_bcc = $this->input->post('bcc');
+		if ($temp_bcc) {
+			$data['bcc'] = $bcc = $this->input->post('bcc');
+		} else {
+			$data['bcc'] = $bcc = $journal->BCC;
+			if ($template[0]->bcc) {
+				$bcc .= $template[0]->bcc;
+			}
+		}
+		//$subject         = str_replace('{$reference_number}', $ms->reference_number, $template[0]->subject);
+		//$data['subject'] = $subject = str_replace('{$journal_code}', $journal->journal_code, $subject);
+		if ($this->input->post('email_subject')) {
+			$data['subject'] = $subject = $this->input->post('email_subject');
+		} else {
+			$data['subject'] = $subject = "Unsubmitted Articles on JMS";
+		}
+		$manager_name = $this->session->userdata('name');
+		$email_body = $this->input->post('email_body');
+		/*if ($email_body) {
+			                $data['message'] = $message = $this->input->post('email_body');
+			            } else {
+			                $data['message'] = $message = $template[0]->email_body;
+		*/
+
+		$message = 'Dear Dr. {@authorName}<br><br>With reference to your submission <b>"{@title}"</b> to the journal <b>"{@journal_title}"</b>, it has been observed that you have left your article incompletely submitted on our online system (JMS). Therefore, you are requested to kindly indicate the problem arising during submission of your article before leaving the paper incompletely submitted.<br><br>The error will be rectified and you may find a new log in id and password to continue with your submission.<br><br><br>Regards,<br><br>
+                {@managername}<br>
+                {@journal_signature}';
+
+		$params['{@title}'] = $ms->title;
+		$params['{@authorName}'] = ucwords($added_by_info->first_name) . ' ' . ucwords($added_by_info->last_name);
+		$params['{@managername}'] = $manager_name;
+		$params['{@journal_title}'] = $journal->journal_title;
+		$params['{@journal_signature}'] = $journal->journal_signature;
+
+		foreach ($params as $key => $val) {
+			$message = str_replace($key, $val, $message);
+		}
+
+		$data['email_body'] = $message;
+
+		$receiver_name = '';
+		$manager_name = $journal->journal_principal_contact;
+
+		if ($this->input->post('send_email') == false) {
+			$this->load->template('admin/SendEmailToAuthor', $data);
+		} else {
+			$send_email = $this->input->post('send_email');
+
+			if ($send_email) {
+				if ($send_email) {
+					$sent = SendSmtpMail($to, $from, $subject, $message, $receiver_name, $manager_name, $cc, $bcc);
+
+					if ($sent) {
+						// mail sent
+						$email_data = array(
+							'manuscript_id' => $manuscript_id,
+							'activity_id' => 0,
+							'to_email' => $this->input->post('to'),
+							'cc_email' => $this->input->post('cc'),
+							'bcc_email' => $this->input->post('bcc'),
+							'email_subject' => "Unsubmitted-" . $this->input->post('email_subject'),
+							'email_body' => $message,
+							'sender' => $this->session->userdata('id'),
+							'created_on' => time(),
+							'created_by' => $this->session->userdata('id'),
+							'updated_on' => time(),
+							'updated_by' => $this->session->userdata('id'),
+							'ip' => ip2long($this->input->ip_address()),
+						);
+
+						$email_log_id = $this->EmailTemplate->SaveEmailPreview($email_data);
+						$this->session->set_flashdata('msg', '<div class="alert alert-success text-center">Your mail has been sent successfully!</div>');
+						redirect('/admin/Dashboard/UnsubmittedManuscripts');
+					} else {
+						//error
+						$this->session->set_flashdata('msg', '<div class="alert alert-danger text-center">There is error in sending mail! Please try again later</div>');
+						redirect('/admin/Dashboard/UnsubmittedManuscripts');
+					}
+				}
+			}
+		}
+	}
+
+	public function add_subject($journal_id = '')
+	{
+		$journal_data = $this->Journal->getJournalDataById($journal_id);
+		$journal_subject = $this->Journal->getJournalSubjects();
+		$journal_subject_added = $this->Journal->getAddedJournalSubjects($journal_id);
+
+		foreach ($journal_subject_added as $subject) {
+			$added_subject[] = $subject->subject_id;
+		}
+
+		$data['journal_id'] = $journal_id;
+		$data['journal_code'] = $journal_data->journal_code;
+		$data['journal_name'] = $journal_data->journal_title;
+		$data['journal_subject'] = $journal_subject;
+		$data['added_subject'] = $added_subject;
+
+		$this->load->template('admin/add_subject', $data);
+	}
+
+	public function save_journal_subject()
+	{
+		$journal_id = $this->input->post('journal_id');
+		$counter = $this->input->post('counter');
+
+		//Delete all subjects within journal_subject table
+		$this->Journal->DeleteAllSubjects($journal_id);
+
+		//Add journal subjects
+		for ($a = 1; $a <= $counter; $a++) {
+			$subject = $this->input->post('subject' . $a);
+			if (!empty($subject)) {
+				$subject_journal = array(
+					'journal_id' => $journal_id,
+					'subject_id' => $this->input->post('subject' . $a),
+					'added_on' => time(),
+				);
+				$this->Journal->SaveJournalSubject($subject_journal);
+			} //if !empty subject
+		} //forloop to extract variables
+		redirect('/admin/Dashboard/manage_journals');
+	}
+
+	public function BlacklistReviewer($param = '')
+	{
+		$this->load->template('admin/blacklist_reviewer', $param);
+	}
+
+	public function AddReviewer($param = '')
+	{
+		// Get some data from the user's session
+		$this->load->template('admin/add_reviewer', $param);
+	}
+
+	public function AssignedReviewer($ref_number = '')
+	{
+		$btn_search_refrence_number = $this->input->post('search_refrence_number');
+
+		if (isset($btn_search_refrence_number)) {
+			$refrence_number = $this->input->post('reference_number');
+			$data['reference_number'] = $refrence_number;
+
+			$ms = $this->Manuscript->getManuscriptByReferenceNumber($refrence_number);
+
+			$ms_reviewers         = $this->Reviewer->getManuscriptReviewersByMsId($ms->manuscript_id);
+			$data['ms_reviewers'] = $ms_reviewers;
+
+			$completed_reviewers            = $this->Reviewer->GetPositiveReviewerRecommendationByMsId($ms->manuscript_id);
+			$data['ms_completed_reviewers'] = $completed_reviewers;
+		}
+
+		if (!empty($ref_number)) {
+			$refrence_number = $ref_number;
+			$data['reference_number'] = $refrence_number;
+
+			$ms = $this->Manuscript->getManuscriptByReferenceNumber($refrence_number);
+
+			$ms_reviewers         = $this->Reviewer->getManuscriptReviewersByMsId($ms->manuscript_id);
+			$data['ms_reviewers'] = $ms_reviewers;
+
+			$completed_reviewers            = $this->Reviewer->GetPositiveReviewerRecommendationByMsId($ms->manuscript_id);
+			$data['ms_completed_reviewers'] = $completed_reviewers;
+		}
+
+		$this->load->template('admin/assigned_reviewer', $data);
+	}
+
+	public function AssignedReviewerChangeFlag($review_id, $refrence_number, $form_flag)
+	{
+		$data = array(
+			'form_flag'		=>	$form_flag
+		);
+		$this->Reviewer->ChangeReviewerFlagStatus($review_id, $data);
+		$this->AssignedReviewer($refrence_number);
+	}
+
+	public function SaveReviewer()
+	{
+		$user_id = $this->session->userdata('id');
+		$add_reviewer = $this->input->post('search_user_roles');
+		$view_reviewer = $this->input->post('view_reviewer_detail');
+
+		$this->load->library('form_validation');
+		//Vaildation
+		$this->form_validation->set_rules('email', 'Email', 'trim|required|valid_email');
+		$this->form_validation->set_rules('reference_number', 'Reference Number', 'trim|required|xss_clean');
+		$this->form_validation->set_rules('h_index', 'H-Index', 'trim|required|xss_clean');
+
+		//Posted value....
+		$email = $this->input->post('email');
+		$reference_number = $this->input->post('reference_number');
+		$h_index = $this->input->post('h_index');
+
+		//Bind Data
+		$data['rev_email'] = $email;
+		$data['ref_num'] = $reference_number;
+		$data['h_index'] = $h_index;
+
+		if ($this->form_validation->run() == TRUE) {
+
+			if ($view_reviewer == TRUE) {
+
+				$join['affiliation']   = 'affiliation';
+				$join['country']   = 'country';
+				$param['is_principle'] = '1';
+				$ms_detail = $this->Manuscript->getManuscriptByReferenceNumber($reference_number);
+				$author_detail = $this->Author->getAuhorsByMsid($ms_detail->manuscript_id, $join, $param);
+
+				$reviewer_detail = $this->User->searchUsersByEmail('u.user_id desc', '', '', '', '', $email);
+				$order_by = 'user_affiliation_id desc';
+				$reviewer_aff = $this->User->get_user_affiliation($reviewer_detail[0]->user_id, $order_by);
+
+				$blacklist_reviewer_detail = $this->Reviewer->GetBlackListReviewers("u.user_id desc", '', '', '', '', $email);
+
+				$review_comments = $this->Review->getReviewCommentsByEmail($email);
+				$data['review_comments'] = $review_comments;
+
+				$date = "Yes";
+				$review_comments_log = $this->Review->getReviewCommentslogByEmail($email, $date);
+				$data['review_comments_log'] = $review_comments_log;
+
+				$review_confirm = $this->Review->getconfirmReviewByEmail($email);
+				$data['review_confirm'] = $review_confirm;
+
+
+				$data['reviewer_aff'] = $reviewer_aff;
+				$data['reviewer_detail'] = $reviewer_detail;
+				$data['author_country'] = $author_detail[0]->country_name;
+				$data['blacklist_reviewer'] = $blacklist_reviewer_detail[0]->black_list_id;
+
+				$this->AddReviewer($data);
+			}
+			if ($add_reviewer == TRUE) {
+				//Get Exizts user
+				$user_exists = $this->User->isUserExist($email);
+
+				//Get Journal Id
+				$manuscript_details = $this->Manuscript->getManuscriptByReferenceNumber($reference_number);
+				$journal_id = $manuscript_details->journal_id;
+				$manuscript_id = $manuscript_details->manuscript_id;
+
+				$get_details_added_by = $this->User->get_user_detail($manuscript_details->added_by);
+
+				if (!empty($user_exists)) {
+					if (!empty($journal_id)) {
+						//get review already exists with same journal and role...
+						$reviewer_exists = $this->Reviewer->ReviewerAlreadyExists($email, $journal_id, __reviewer__);
+						//check reviewer if assigned twice time
+						$reviewer_assign_already_in_log = $this->Review->getReviewFormResponsesList($manuscript_id);
+
+						if (!empty($reviewer_exists)) {
+							if ($get_details_added_by->email != $email) {
+								if ($reviewer_assign_already_in_log[0]->reviewer_user_id != $user_exists) {
+									$rev_data["manuscript_id"] = $manuscript_id;
+									$rev_data["journal_id"] = $journal_id;
+									$rev_data["reviewer_user_id"] = $reviewer_exists->user_id;
+									$rev_data["recommendation_id"] = 0; //requested id
+									$rev_data["h_index"] = $h_index;
+									$rev_data["date_assigned"] = time();
+									$rev_data["date_acknowledged"] = time();
+									$rev_data["date_notified"] = time();
+									$rev_data["last_modified"] = time();
+									$rev_data["assigned_by"] = $this->session->userdata('id');
+									$rev_data["article_type_id"] = $this->Manuscript->getManuscriptById($manuscript_id)->article_type_id;
+									//Add Reviewer
+									$review_id = $this->Reviewer->AddAssignReviewer($rev_data);
+
+									//Update User Profile
+									$h_condition['user_id'] = $reviewer_exists->user_id;
+									$h_data['h_index'] = $h_index;
+									$this->User->updateProfileTable($h_condition, $h_data);
+
+									$data = "";
+									$data['reviewer_add_succ'] = 'Reviewer add successfully....';
+									$this->AddReviewer($data);
+								} else {
+									$data['rev_already_assigned'] = 'Attention ! Reviewer already assigned not for twice time ...';
+									$this->AddReviewer($data);
+								} //else check reviewer already assigned in log table
+							} else {
+								$data['rev_match_added_by'] = 'Attention ! Reviewer email match with manuscript added by ...';
+								$this->AddReviewer($data);
+							} //else email not match
+						} //if reviewer exists..
+						else {
+							$data['reviewer_role_not_assign'] = 'Attention ! User have not reviewer role ...';
+							$this->AddReviewer($data);
+						} //else
+					} else {
+						$data['manuscript_not_exist'] = 'Attention ! Reference Number Not match...';
+						$this->AddReviewer($data);
+					} //else journal id not found...
+				} else {
+					$data['user_not_exist'] = 'Attention ! User Not exists...';
+					$this->AddReviewer($data);
+				} //else user not registered...
+			} //if add reviwer button
+		} //validation message
+
+		else {
+			$this->AddReviewer($data);
+		}
+	} //Save Reviewer
+
+	function manage_blacklist_reviewer($search_role = '0', $search_keyword = '0')
+	{
+		$p1 = $this->input->post('search_role');
+		$p2 = $this->input->post('keyword');
+
+		if (!empty($p2)) {
+			$search_keyword = $this->input->post('keyword');
+		}
+		//if($search_keyword == 0){ $search_keyword ="";}
+
+		$orderby = " u.user_id desc ";
+
+		$pagename = base_url('/admin/Dashboard/manage_blacklist_reviewer/' . $search_role . '/' . $search_keyword);
+		$config = PaginationConfiguration($pagename);
+		$page = ($this->uri->segment(6)) ? $this->uri->segment(6) : 0;
+		$page = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+		$config['total_rows'] = $this->Reviewer->GetBlackListReviewers($orderby, 'count', '', '', $search_role, $search_keyword);
+		$config['uri_segment'] = 6;
+		$config['per_page'] = 20;
+		$choice = $config['total_rows'] / $config['per_page'];
+		$config['num_links'] = 10; //round($choice);
+		$this->pagination->initialize($config);
+
+		$data['pagination'] = $this->pagination->create_links();
+
+		//$data['users'] =  $this->User->getUsersByRoleId($role);
+		$data['users'] = $this->Reviewer->GetBlackListReviewers($orderby, '', $config['per_page'], $page, $search_role, $search_keyword);
+
+		$data['roles'] = $this->User->get_role_detail();
+		$data['keyword'] = $search_keyword;
+		$data['search_role_id'] = $search_role;
+		$data['search_role_name'] = $this->User->get_role_name($search_role);
+
+		$this->load->template('admin/blacklist_reviewer', $data);
+	}
+
+	function add_blacklist_reviewer($data = '')
+	{
+		$blacklist_email = $this->input->post('blacklist_email');
+		$blacklist_comments = $this->input->post('blacklist_comments');
+		$blacklist_email_exist = $this->Reviewer->CheckInBlackList($blacklist_email);
+
+		if (!empty($blacklist_email_exist)) {
+			redirect('/admin/Dashboard/manage_blacklist_reviewer');
+		} else {
+			$blacklist_user = $this->User->isUserAlreadyExists($blacklist_email);
+
+			if ($blacklist_user) {
+				$data['user_id'] = $blacklist_user->user_id;
+				$data['email'] = $blacklist_user->email;
+				$data['added_on'] = time();
+				$data['comments'] = $blacklist_comments;
+			} else {
+				$data['user_id'] = 'null';
+				$data['email'] = $blacklist_email;
+				$data['added_on'] = time();
+				$data['comments'] = $blacklist_comments;
+			}
+
+			$this->Reviewer->add_blacklist_reviewer($data);
+			redirect('/admin/Dashboard/manage_blacklist_reviewer');
+		}
+	}
+
+	function delete_blacklist_reviewer($black_list_id = '')
+	{
+		$user = $this->Reviewer->delete_blacklist_reviewer($black_list_id);
+		redirect('/admin/Dashboard/manage_blacklist_reviewer');
+	}
+
+	function manage_reviewer_comments($reference_number)
+	{
+		$p2 = $this->input->post('keyword');
+
+		if (!empty($p2)) {
+			$data['keyword'] = $search_keyword = $this->input->post('keyword');
+		} elseif (!empty($reference_number)) {
+			$data['keyword'] = $search_keyword = $reference_number;
+		}
+
+		$review_comments = $this->Review->getReviewCommentsByReferenceNumber($search_keyword);
+		$data['review_comments'] = $review_comments;
+
+		$review_comments_log = $this->Review->getReviewCommentslogByReferenceNumber($search_keyword, '');
+		$data['review_comments_log'] = $review_comments_log;
+
+		$manuscript_id = $review_comments_log[0]->manuscript_id;
+
+		$review_response_log = $this->Review->getDeletedReviewComments($search_keyword);
+		$data['review_response_log'] = $review_response_log;
+
+		$completed_reviewers = $this->Reviewer->GetPositiveReviewerRecommendationByMsId($manuscript_id);
+
+		foreach ($completed_reviewers as $reviewer) {
+			$ReviewFormResponses = $this->Review->getReviewFormResponses($reviewer->review_id);
+			$response[$reviewer->review_id] = json_decode($ReviewFormResponses->response_value);
+		}
+
+		$data['ReviewFormResponses'] = $response;
+
+		$data['manuscript'] = $this->Manuscript->getManuscriptById($manuscript_id);
+		include __SITE_PATH__ . '/reviewforms/' . $data['manuscript']->review_form . '.php';
+		$data['review_form'] = $review_form;
+
+		$this->load->template('admin/reviewer_comments', $data);
+	}
+
+	function manage_reviewer_comments_by_email()
+	{
+		$p2 = $this->input->post('keyword');
+
+		if (!empty($p2)) {
+			$data['keyword'] = $search_keyword = $this->input->post('keyword');
+		}
+
+		$review_comments = $this->Review->getReviewCommentsByEmail($search_keyword);
+		$data['review_comments'] = $review_comments;
+
+		$review_comments_log = $this->Review->getReviewCommentslogByEmail($search_keyword, '');
+		$data['review_comments_log'] = $review_comments_log;
+
+		$review_confirm = $this->Review->getconfirmReviewByEmail($search_keyword);
+		$data['review_confirm'] = $review_confirm;
+
+		$review_decline = $this->Review->getDeclineReviewByEmail($search_keyword);
+		$data['review_decline'] = $review_decline;
+
+		$manuscript_id = $review_comments_log[0]->manuscript_id;
+
+		$completed_reviewers = $this->Reviewer->GetPositiveReviewerRecommendationByMsId($manuscript_id);
+
+		foreach ($completed_reviewers as $reviewer) {
+			$ReviewFormResponses = $this->Review->getReviewFormResponses($reviewer->review_id);
+			$response[$reviewer->review_id] = json_decode($ReviewFormResponses->response_value);
+		}
+
+		$data['ReviewFormResponses'] = $response;
+
+		$data['manuscript'] = $this->Manuscript->getManuscriptById($manuscript_id);
+		include __SITE_PATH__ . '/reviewforms/' . $data['manuscript']->review_form . '.php';
+		$data['review_form'] = $review_form;
+
+		$this->load->template('admin/reviewer_search_by_email', $data);
+	}
+
+	function delete_reviewer_comments($review_log_id)
+	{
+		$review_comments_log = $this->Review->getReviewCommentslogByReferenceNumber('', $review_log_id);
+		$review_comments_log = $review_comments_log[0];
+		$review_id = $review_comments_log->review_id;
+
+		$rev_data['review_id'] = $review_comments_log->review_id;
+		$rev_data['manuscript_id'] = $review_comments_log->manuscript_id;
+		$rev_data['journal_id'] = $review_comments_log->journal_id;
+		$rev_data['reviewer_user_id'] = $review_comments_log->reviewer_user_id;
+		$rev_data['h_index'] = $review_comments_log->h_index;
+		$rev_data['competing_interests'] = $review_comments_log->competing_interests;
+		//$rev_data['recommendation_id'] = $review_comments_log->recommendation_id;
+		$rev_data['date_assigned'] = $review_comments_log->date_assigned;
+		$rev_data['date_notified'] = $review_comments_log->date_notified;
+		$rev_data['date_confirmed'] = $review_comments_log->date_confirmed;
+		//$rev_data['date_completed'] = $review_comments_log->date_completed;
+		$rev_data['date_acknowledged'] = $review_comments_log->date_acknowledged;
+		$rev_data['date_due'] = $review_comments_log->date_due;
+		$rev_data['last_modified'] = $review_comments_log->last_modified;
+		$rev_data['last_modified_by'] = $review_comments_log->last_modified_by;
+		$rev_data['assigned_by'] = $review_comments_log->assigned_by;
+		$rev_data['reminder_was_automatic'] = $review_comments_log->reminder_was_automatic;
+		$rev_data['declined'] = $review_comments_log->declined;
+		$rev_data['replaced'] = $review_comments_log->replaced;
+		$rev_data['cancelled'] = $review_comments_log->cancelled;
+		$rev_data['reviewer_file_id'] = $review_comments_log->reviewer_file_id;
+		$rev_data['eml_file_id'] = $review_comments_log->eml_file_id;
+		$rev_data['date_rated'] = $review_comments_log->date_rated;
+		$rev_data['date_reminded'] = $review_comments_log->date_reminded;
+		$rev_data['quality'] = $review_comments_log->quality;
+		$rev_data['round'] = $review_comments_log->round;
+		$rev_data['article_type_id'] = $review_comments_log->article_type_id;
+		$rev_data['due_date_reminded'] = $review_comments_log->due_date_reminded;
+
+		$this->Review->revertReviewLog($rev_data, $review_id);
+
+		$response_log['reviewer_file_id'] = $review_comments_log->due_date_reminded;
+		$response_log['deleted_on'] = time();
+		$response_log['date_assigned'] = $review_comments_log->date_assigned;
+		$response_log['date_notified'] = $review_comments_log->date_notified;
+		$response_log['date_confirmed'] = $review_comments_log->date_confirmed;
+		$response_log['date_completed'] = $review_comments_log->date_completed;
+		$response_log['date_acknowledged'] = $review_comments_log->date_acknowledged;
+		$response_log['date_due'] = $review_comments_log->date_due;
+		$response_log['last_modified'] = $review_comments_log->last_modified;
+		$response_log['assigned_by'] = $review_comments_log->assigned_by;
+
+		$this->Review->CreateReviewResponseLog($response_log, $review_id);
+
+		redirect('admin/Dashboard/manage_reviewer_comments/' . $review_comments_log->reference_number);
+	}
+
+	function archive($manuscript_id = null)
+	{
+		$btn_archive = $this->input->post('btn_archive');
+		$ref_number = trim($this->input->post('ref_number'));
+
+		if (isset($btn_archive) && $btn_archive > 0) {
+			$manuscript_id = $btn_archive;
+			$update['status'] = 0;
+			$update['process_state'] = 'Archived';
+			$this->Manuscript->UpdateManuscriptStatus($update, $btn_archive);
+			/**************************************************************************************************************/
+
+			$msg = 'Manuscript ' . $ref_number . ' Has Been Archived From Admin Panel';
+
+			$event_log_data = array(
+				'manuscript_id' => $manuscript_id,
+				'message' => $msg,
+				'user_id' => $this->session->userdata('id'),
+				'date_logged' => time(),
+				'ip_address' => ip2long($this->input->ip_address()),
+			);
+
+			$insert_log_id = $this->Notificationalerts->AddEventLog($event_log_data);
+		}
+
+		$param['orderby'] = 'qa.qa_lid desc';
+
+		//Search By Reference number...
+		if (!empty($ref_number)) {
+			$param['reference_number'] = $ref_number;
+			$data['manuscript'] = $this->Manuscript->GetManuscriptList($param);
+			$data['ref_number'] = $ref_number;
+		} //!empty reference
+		$this->load->template('admin/archive_manuscript', $data);
+	}
+
+	//ArchiveManuscript
+	// function archive_manuscript($manuscript_id = ''){
+
+	// // set col status is deciline
+	// $mdata['status'] = '0';
+	// $mdata['process_state'] = 'Archived';
+	// $condition['manuscript_id'] = $manuscript_id;
+	// $this->Manuscript->updateManuscriptTable($condition,$mdata);
+
+	// //delete from "Eic Intial Scopic" and "Qc"
+	// $this->Qa->DeleteAllManuscriptRecord($manuscript_id);
+
+	// /////////////////// Release all reviewers//////////////////////////
+	// $reviewers  =  $this->Reviewer->getAssignedReviewersByMsId($manuscript_id);
+	// // insert assigned reviewers into log
+	// foreach($reviewers as $reviewer)
+	// {
+	// $this->Review->AddReviewLog($reviewer->review_id);
+	// }
+	// // remove from review assignments table after insert into log
+	// $this->Review->deleteReviewByManuscriptId($manuscript_id);
+
+	// ///////////////////// Release all handling editors/////////////////////
+	// $editors  =  $this->Editor->getAssignedHandlingEditorsList($manuscript_id);
+	// // insert assigned reviewers into log
+	// foreach($editors as $editor)
+	// {
+	// $editorHistory['manuscript_id']	=$editor->manuscript_id;
+	// $editorHistory['editor_id']		=$editor->editor_id;
+	// $editorHistory['user_id']		=$editor->user_id;
+	// $editorHistory['date_request']	=$editor->date_assigned;
+
+	// $this->Editor->AddAssignEditorHistory($editorHistory);
+	// }
+	// // remove from editor assignments table after insert into log
+	// $this->Editor->deleteEditorByManuscriptId($manuscript_id);
+
+	// //Epub Full Text
+	// $this->Epub->deleteEpubFullText($manuscript_id);
+
+	// // remove from tbl_composing
+	// $this->Composing->deleteComposing($manuscript_id);
+
+	// // remove from tbl_copyediting
+	// $this->CopyEditing->deleteCopyEditing($manuscript_id);
+
+	// // remove from Epub Abstract
+	// $this->Epub->deleteEpubAbstract($manuscript_id);
+	// //delete from in verification
+	//$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+
+	// // remove from in verification
+	// //$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+
+	// //Set Editor Decision Decline
+	// $decision_data['decision'] = __JM_DECLINED__;
+	// $decision_data['date_decided'] = time();
+	// $this->Editor->UpdateEditorDecision($decision_data,$manuscript_id);
+
+	// //Add Entry in Event Log
+	// $msg='Admin (' . $this->session->name . ') has archived manuscript (' . $manuscript_id. ').';
+	// $event_log_data = array(
+	// 'manuscript_id'=> $manuscript_id,
+	// 'message'      => $msg,
+	// 'user_id'      => $this->session->userdata('id'),
+	// 'date_logged'  => time(),
+	// 'ip_address'   => ip2long($this->input->ip_address())
+	// );
+	// $insert_log_id     = $this->Notificationalerts->AddEventLog($event_log_data);
+	// $notification_data = array('log_id' 	  => $insert_log_id,
+	// 'user_role_id'=> __journalmanager__,
+	// 'event_date'  => time());
+	// $this->Notificationalerts->AddNotification($notification_data);
+	// ///////////////// END /////////////////
+
+	// redirect('/admin/Dashboard/archive');
+
+	// }	//end of function
+
+	public function RevertArticle()
+	{
+		$ref_no = trim($this->input->post('ref_number'));
+
+		//!empty reference number
+		if (!empty($ref_no)) {
+			//Get Manuscript details
+			$manuscript_detail = $this->Manuscript->getManuscriptByReferenceNumber($ref_no);
+			$manuscript_id = $manuscript_detail->manuscript_id;
+
+			//if case is HT
+			if ($manuscript_detail->manuscript_type == 'M' && $manuscript_detail->ht_code > 0) {
+				$this->RevertInHT($manuscript_id, $ref_no);
+			} else {
+				$this->RevertInGT($manuscript_id, $ref_no);
+			} //else case is GT
+		} //if ref no
+
+		//Bind Variables
+		$data['ref_number'] = $ref_no;
+		$data['manuscript_id'] = $manuscript_id;
+
+		if (empty($ref_no)) {
+			$this->load->template('admin/revert_manuscript_gt', $data);
+		}
+	} //RevertArticle
+
+	public function RevertInHT($manuscript_id, $ref_no)
+	{
+		//Get Qa Pool
+		$ms_in_qa_detail = $this->Qa->GetQaDecisionByManuscriptID($manuscript_id);
+		$ms_in_qa_status = $ms_in_qa_detail->status_result;
+
+		//Get in verification
+		$in_verification_detail = $this->Verification->GetInVerificationManuscriptByID($manuscript_id);
+		$ms_in_verification_status = $in_verification_detail->verification_status;
+
+		//Get Qc
+		$qc_detail = $this->Qc->GetQCManuscriptByID($manuscript_id);
+		$qc_status = $qc_detail->status;
+
+		//Get Eic initial scopic
+		$eic_initial_scopic_detail = $this->Eic_initial_scopic->GetEicManuscriptCurrentStatus($manuscript_id);
+		$ms_in_initial_scopic_status = $eic_initial_scopic_detail->initial_scopic_status;
+
+		//Get Manuscript In Review
+		$ms_in_review_detail = $this->Review->getManuscriptReviewDetailByMSId($manuscript_id);
+		$ms_in_review_status = $ms_in_review_detail->review_status;
+
+		//print_r($ms_in_qa_detail);exit;
+
+		if ($ms_in_qa_status != "") {
+			$editorial_decision = $this->Editor->GetEditorDecision($manuscript_id);
+			$eic_initial_decision = $this->Eic_initial_scopic->getEicInitalScopicLogByMSId($manuscript_id);
+
+			$declined_in_stage = "";
+
+			if (($ms_in_qa_status == '__ARCHIVE_REQUEST__') && ($editorial_decision->decision == __JM_DECLINED__)) {
+				$declined_in_stage = "__ARCHIVE_REQ_BY_JM__";
+			} else if (($ms_in_qa_status == '__ARCHIVED__') && ($editorial_decision->decision == __JM_DECLINED__)) {
+				$declined_in_stage = "__ARCHIVED_FROM_JM__";
+			} else if (($ms_in_qa_status == '__ARCHIVE_REQUEST__') && ($eic_initial_decision->initial_scopic_status == __EIC_INITIAL_REJECT__)) {
+				$declined_in_stage = "__ARCHIVE_REQ_BY_EIC__";
+			} else if (($ms_in_qa_status == '__ARCHIVED__') && ($eic_initial_decision->initial_scopic_status == __EIC_INITIAL_REJECT__)) {
+				$declined_in_stage = "__ARCHIVED_FROM_EIC__";
+			}
+
+			$ms_in_qa_status = !empty($declined_in_stage) ? $declined_in_stage : $ms_in_qa_status;
+
+			$data['ms_in_status'] = $ms_in_qa_status;
+			$data['pool_in_exist'] = 'QA';
+			// $data['archive_in_stage'] = $declined_in_stage;
+		} else if ($ms_in_verification_status != "") {
+			$data['ms_in_status'] = $ms_in_verification_status;
+			$data['pool_in_exist'] = 'IN_VERIFICATION';
+		} else if ($qc_status != "") {
+			$data['ms_in_status'] = $qc_status;
+			$data['pool_in_exist'] = 'QC';
+		} else if ($ms_in_initial_scopic_status != "") {
+			$data['ms_in_status'] = $ms_in_initial_scopic_status;
+			$data['pool_in_exist'] = 'EIC_INITIAL';
+		} else if ($ms_in_review_status != "") {
+			$data['ms_in_status'] = $ms_in_review_status;
+			$data['pool_in_exist'] = 'REVIEW';
+			$data['revision_required'] = $ms_in_review_detail->revision_required;
+		}
+		//echo $ms_in_review_detail->revision_required; exit;
+
+		//echo $data['pool_in_exist']; exit;
+
+		//Bind Variables
+		$data['ref_number'] = $ref_no;
+		$data['manuscript_id'] = $manuscript_id;
+
+		$this->load->template('admin/revert_manuscript_ht', $data);
+	} //RevertInHT
+
+	public function RevertInGT($manuscript_id, $ref_no)
+	{
+		//Get Qa Pool
+		$ms_in_qa_detail = $this->Qa->GetQaDecisionByManuscriptID($manuscript_id);
+		$ms_in_qa_status = $ms_in_qa_detail->status_result;
+
+		//Get in verification
+		$in_verification_detail = $this->Verification->GetInVerificationManuscriptByID($manuscript_id);
+		$ms_in_verification_status = $in_verification_detail->verification_status;
+
+		//Get Qc
+		$qc_detail = $this->Qc->GetQCManuscriptByID($manuscript_id);
+		$qc_status = $qc_detail->status;
+
+		//Get Eic initial scopic
+		$eic_initial_scopic_detail = $this->Eic_initial_scopic->GetEicManuscriptCurrentStatus($manuscript_id);
+		$ms_in_initial_scopic_status = $eic_initial_scopic_detail->initial_scopic_status;
+
+		//Get Manuscript In Review
+		$ms_in_review_detail = $this->Review->getManuscriptReviewDetailByMSId($manuscript_id);
+		$ms_in_review_status = $ms_in_review_detail->review_status;
+
+		//print_r($ms_in_qa_detail);exit;
+
+		if ($ms_in_qa_status != "") {
+			$editorial_decision = $this->Editor->GetEditorDecision($manuscript_id);
+			$eic_initial_decision = $this->Eic_initial_scopic->getEicInitalScopicLogByMSId($manuscript_id);
+
+			//if exists in review
+			$exists_in_review = $this->Review->getReviewInManuscriptAlreadyExists($manuscript_id);
+			$data['in_review_exists'] = !empty($exists_in_review) ? $exists_in_review : 0;
+
+			$declined_in_stage = "";
+
+			if (($ms_in_qa_status == '__ARCHIVE_REQUEST__') && ($editorial_decision->decision == __JM_DECLINED__)) {
+				$declined_in_stage = "__ARCHIVE_REQ_BY_JM__";
+			} else if (($ms_in_qa_status == '__ARCHIVED__') && ($editorial_decision->decision == __JM_DECLINED__)) {
+				$declined_in_stage = "__ARCHIVED_FROM_JM__";
+			} else if (($ms_in_qa_status == '__ARCHIVE_REQUEST__') && ($eic_initial_decision->initial_scopic_status == __EIC_INITIAL_REJECT__)) {
+				$declined_in_stage = "__ARCHIVE_REQ_BY_EIC__";
+			} else if (($ms_in_qa_status == '__ARCHIVED__') && ($eic_initial_decision->initial_scopic_status == __EIC_INITIAL_REJECT__)) {
+				$declined_in_stage = "__ARCHIVED_FROM_EIC__";
+			}
+
+			$ms_in_qa_status = !empty($declined_in_stage) ? $declined_in_stage : $ms_in_qa_status;
+
+			$data['ms_in_status'] = $ms_in_qa_status;
+			$data['pool_in_exist'] = 'QA';
+			// $data['archive_in_stage'] = $declined_in_stage;
+		} else if ($ms_in_verification_status != "") {
+			$data['ms_in_status'] = $ms_in_verification_status;
+			$data['pool_in_exist'] = 'IN_VERIFICATION';
+		} else if ($ms_in_review_status != "") {
+			$data['ms_in_status'] = $ms_in_review_status;
+			$data['pool_in_exist'] = 'REVIEW';
+			$data['revision_required'] = $ms_in_review_detail->revision_required;
+		} else if ($qc_status != "") {
+			$data['ms_in_status'] = $qc_status;
+			$data['pool_in_exist'] = 'QC';
+		} else if ($ms_in_initial_scopic_status != "") {
+			$data['ms_in_status'] = $ms_in_initial_scopic_status;
+			$data['pool_in_exist'] = 'EIC_INITIAL';
+		}
+		//echo $data['pool_in_exist']; exit;
+
+		//Bind Variables
+		$data['ref_number'] = $ref_no;
+		$data['manuscript_id'] = $manuscript_id;
+		$this->load->template('admin/revert_manuscript_gt', $data);
+	} //RevertInGT
+
+	public function RevertDecision()
+	{
+		//Get Btn Value/manuscript_id/pool in exist
+		$manuscript_id = $this->input->post('manuscript_id');
+		$ms_status = $this->input->post('ms_stage_status');
+		$pool_in_exist = $this->input->post('pool_in_exist');
+
+		//if manuscript in QA stage
+		if (($ms_status == '__QA_PENDING__' || $ms_status == '__QA_DECLINE__' || $ms_status == '__ARCHIVE_REQ_BY_JM__'
+				|| $ms_status == '__ARCHIVED_FROM_JM__' || $ms_status == '__ARCHIVE_REQ_BY_EIC__' || $ms_status == '__ARCHIVED_FROM_EIC__'
+				|| $ms_status == '__EIC_INITIAL_REJECT__')
+			&& ($pool_in_exist == 'QA')
+		) {
+			$this->RevertInPool($ms_status, $manuscript_id);
+		} else if (($ms_status == 0) && ($pool_in_exist == 'IN_VERIFICATION')) {
+			$this->RevertInVerification($ms_status, $manuscript_id);
+		} else if (($ms_status == 0 || $ms_status == __QC_VERIFIED__ || $ms_status == __QC_UNVERIFIED__ || $ms_status == __QC_REJECT__
+			|| $ms_status == __QC_EIC_REJECT__) && ($pool_in_exist == 'QC')) {
+			$this->RevertInQc($ms_status, $manuscript_id);
+		} else if (($ms_status == __EIC_NEW_SUBMISSION__ || $ms_status == __EIC_AWAITING_LIST__ || $ms_status == __EIC_INITIAL_APPROVED__
+			|| $ms_status == __EIC_INITIAL_PRE_REVISION__ || $ms_status == __EIC_INITIAL_REJECT__) && ($pool_in_exist == 'EIC_INITIAL')) {
+			$this->RevertInEicInitialScopic($ms_status, $manuscript_id);
+		} else if (($ms_status == __REVIEW_NOT_START__ || $ms_status == __REVIEW_START__ || $ms_status == __REVIEW_COMPLETED__)
+			&& ($pool_in_exist == 'REVIEW')
+		) {
+			$this->RevertInMsInReview($ms_status, $manuscript_id);
+		}
+
+		redirect('/admin/Dashboard/RevertArticle');
+	} //RevertDecision
+
+	public function RevertInEicInitialScopic($eic_initial_status, $manuscript_id)
+	{
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		$msg = 'Admin has reverted (' . $ms->reference_number . ') into Eic initial scopic.';
+		$process_state = 'eic initial scopic';
+
+		//if eic initial scopic new submission
+		if ($eic_initial_status == __EIC_NEW_SUBMISSION__) {
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+
+			//delete in eic initial scopic
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+
+			//Log Msg ht case
+			if ($ms->manuscript_type == 'M' && $ms->ht_code > 0) {
+				$msg = 'Admin has reverted (' . $ms->reference_number . ') into editorial decision.';
+				$process_state = 'editorial decision';
+			} else {
+				$msg = 'Admin has reverted (' . $ms->reference_number . ') into eic initial scopic.';
+				$process_state = 'eic initial scopic';
+				//Add eic initial scopic
+				$this->AddEicInitialScopic($manuscript_id);
+			}
+		} else if ($eic_initial_status == __EIC_AWAITING_LIST__ || $eic_initial_status == __EIC_INITIAL_PRE_REVISION__) {
+			//delete in eic initial scopic
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+
+			//Add in initial scopic
+			$this->AddEicInitialScopic($manuscript_id);
+		} else if ($eic_initial_status == __EIC_INITIAL_REJECT__ || $eic_initial_status == __EIC_INITIAL_APPROVED__) {
+			//delete in eic initial scopic
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+			//delete in QC
+			$this->Qc->DeleteInQC($manuscript_id);
+			//delete in QC log
+			$this->Qc->DeleteInQCLog($manuscript_id);
+			//delete in QA
+			$this->Qa->DeleteDeclineRequest($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+			//delete from Qa Log
+			$this->Qa->DeleteQAManuscriptLog($manuscript_id);
+			//delete in qa qa decline request
+			$this->Qa->DeleteDeclineRequestLog($manuscript_id);
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+
+			//if case is GT
+			if ($ms->manuscript_type == 'M' && $ms->ht_code < 1) {
+				//delete editors from editor assigned table
+				$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+				//delete editor decision
+				$this->Editor->DeleteEditorDecision($manuscript_id);
+				//delete in review
+				$this->Review->DeleteInReview($manuscript_id);
+				$this->Review->deleteReviewByManuscriptId($manuscript_id);
+			}
+
+			//Add in initial scopic
+			$this->AddEicInitialScopic($manuscript_id);
+		}
+
+		/***************************************************************************************************************/
+		//Start update manuscript table
+		/**************************************************************************************************************/
+		//update manuscript table
+		$update_manuscript_detail['revision_required'] = 0;
+		$update_manuscript_detail['status'] = 'A';
+		$update_manuscript_detail['process_state'] = $process_state;
+		$update_manuscript_detail['updated_on'] = time();
+		$update_manuscript_detail['lock_jm_opt'] = 0;
+		$update_manuscript_detail['updated_by'] = $this->session->userdata('id');
+		$update_complete_condition['manuscript_id'] = $manuscript_id;
+
+		$this->Manuscript->updateManuscriptTable($update_complete_condition, $update_manuscript_detail);
+		/***************************************************************************************************************/
+		//End update manuscript table
+		/**************************************************************************************************************/
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+		return true;
+	} //RevertInEicInitialScopic
+
+	public function AddEicInitialScopic($manuscript_id)
+	{
+		/***************************************************************************************************************/
+		//Start Add in Initial Scopic status
+		/**************************************************************************************************************/
+		//Get Add In Eic Initial scopic
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+
+		//insert manuscript for EIC initial scopic Process
+		$intial_scopic['manuscript_id'] = $ms->manuscript_id;
+		$intial_scopic['journal_id'] = $ms->journal_id;
+		$intial_scopic['initial_scopic_status'] = __EIC_NEW_SUBMISSION__;
+		$intial_scopic['date_arrived'] = time();
+
+		$this->Manuscript->insert_eic_intial_scopic($intial_scopic);
+
+		/***************************************************************************************************************/
+		//End Add in Initial Scopic status
+		/**************************************************************************************************************/
+		return true;
+	}
+
+	function RevertInVerification($in_verification_status, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+
+		if ($ms->manuscript_type == 'M' && $ms->ht_code > 0) {
+			$mdata['process_state'] = "In QC";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Qc Pool.';
+
+			//delete in QC
+			$this->Qc->DeleteInQC($manuscript_id);
+			//delete in QC log
+			$this->Qc->DeleteInQCLog($manuscript_id);
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+
+			//Add In Manuscript in review
+			$MsInQC['manuscript_id'] = $manuscript_id;
+			$MsInQC['journal_id'] = $ms->journal_id;
+			$MsInQC['decision_made_by'] = $this->session->userdata('id');
+			$MsInQC['ip_address'] = ip2long($this->input->ip_address());
+			$MsInQC['date_notified'] = time();
+
+			$this->Qc->AddQcManuscript($MsInQC);
+		} else {
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into editorial decision.';
+
+			//Update manuscript table
+			$mdata['process_state'] = "Editorial decision";
+
+			$mdata['lock_jm_opt'] = 0; // 1 is lock 0 is open
+			$mdata['lock_qa_opt'] = 1; // 1 is lock 0 is open
+
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+		} //else gt case
+
+		//update manuscript table
+		$mdata['status'] = 'A';
+		$mdata['updated_by'] = $this->session->userdata('id');
+		$mdata['updated_on'] = time();
+		$condition['manuscript_id'] = $manuscript_id;
+		$this->Manuscript->updateManuscriptTable($condition, $mdata);
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+	} //RevertInVerification
+
+	function RevertInQc($qc_status, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		$msg = 'Admin has reverted (' . $ms->reference_number . ') into Qc Pool.';
+
+		if ($qc_status == __QC_EIC_REJECT__) {
+			//delete from eic initial scopic
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+		}
+
+		//if ht case
+		if ($ms->manuscript_type == 'M' && $ms->ht_code > 0) {
+			//if Qc pending
+			if ($qc_status == 0) {
+				$msg = 'Admin has reverted (' . $ms->reference_number . ') into eic initial scopic.';
+
+				//delete in eic initial scopic
+				$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+				//delete eic comments
+				$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+				//delete from eic log
+				$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+				//delete in QC
+				$this->Qc->DeleteInQC($manuscript_id);
+				//delete in QC log
+				$this->Qc->DeleteInQCLog($manuscript_id);
+
+				//revert into eic initial scopic
+				$this->AddEicInitialScopic($manuscript_id);
+			}
+		} //if ht case
+
+		//delete from qc verification in case it is ht case.
+		$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+
+		//update manuscript table
+		$mdata['status'] = 'A';
+		$mdata['process_state'] = "Manuscript In QC";
+		$mdata['updated_by'] = $this->session->userdata('id');
+		$mdata['updated_on'] = time();
+		$condition['manuscript_id'] = $manuscript_id;
+		$this->Manuscript->updateManuscriptTable($condition, $mdata);
+
+		//delete from in qc log table
+		$this->Qc->DeleteInQCLog($manuscript_id);
+		//Update Qc Table
+		$qc_data['ip_address'] = ip2long($this->input->ip_address());
+		$qc_data['status'] = 0;
+		$qc_data['date_notified'] = time();
+		$qc_data['date_underway'] = time();
+		$qc_data['date_completed'] = 0;
+		$this->Qc->UpdateQcManuscript($qc_data, $manuscript_id);
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+	} //RevertInQc
+
+	function RevertInMsInReview($ms_in_review_status, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		$msg = 'Admin has reverted (' . $ms->reference_number . ') into Editorial Decision.';
+
+		if ($ms->manuscript_type == 'M' && $ms->ht_code > 0) {
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+			//delete in eic initial scopic
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+			//delete in QC
+			$this->Qc->DeleteInQC($manuscript_id);
+			//delete in QC log
+			$this->Qc->DeleteInQCLog($manuscript_id);
+			//delete in QA
+			$this->Qa->DeleteDeclineRequest($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+			//delete from Qa Log
+			$this->Qa->DeleteQAManuscriptLog($manuscript_id);
+			//delete in qa qa decline request
+			$this->Qa->DeleteDeclineRequestLog($manuscript_id);
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+		} else {
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+			//delete in QA
+			$this->Qa->DeleteDeclineRequest($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+			//delete from Qa Log
+			$this->Qa->DeleteQAManuscriptLog($manuscript_id);
+			//delete in qa qa decline request
+			$this->Qa->DeleteDeclineRequestLog($manuscript_id);
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+		} //else GT case
+
+		//update manuscript table
+		$mdata['process_state'] = "Manuscript In Review";
+		$mdata['updated_by'] = $this->session->userdata('id');
+		$mdata['updated_on'] = time();
+		$mdata['revision_required'] = 0;
+		$mdata['status'] = 'A';
+		$mdata['lock_jm_opt'] = 0;
+		$condition['manuscript_id'] = $manuscript_id;
+		$this->Manuscript->updateManuscriptTable($condition, $mdata);
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+	} //RevertInMsInReview
+
+	function RevertInPool($ms_in_qa, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+		if ($ms->manuscript_type == 'M' && $ms->ht_code > 0) {
+			$this->RevertInHtDecision($ms_in_qa, $manuscript_id);
+		} else {
+			$this->RevertInGtDecision($ms_in_qa, $manuscript_id);
+		}
+	} //RevertInQa
+
+	function RevertInGtDecision($ms_status, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+
+		if ($ms_status == '__ARCHIVE_REQ_BY_EIC__' || $ms_status == '__ARCHIVED_FROM_EIC__') {
+			//if exists in review
+			$exists_in_review = $this->Review->getReviewInManuscriptAlreadyExists($manuscript_id);
+			//if exists in qc
+			$exists_in_qc = $this->Qc->getQCManuscriptAlreadyExists($manuscript_id);
+
+			if ($exists_in_qc[0]->status == __QC_EIC_REJECT__) {
+				//delete in QC
+				$this->Qc->DeleteInQC($manuscript_id);
+
+				//Add In Manuscript in qc
+				$MsInQc['manuscript_id'] = $manuscript_id;
+				$MsInQc['journal_id'] = $ms->journal_id;
+				$MsInQc['status'] = 0;
+				$MsInQc['decision_made_by'] = $this->session->userdata('id');
+				$MsInQc['ip_address'] = ip2long($this->input->ip_address());
+				$MsInQc['date_notified'] = time();
+
+				$this->Qc->AddQcManuscript($MsInQc);
+			}
+
+			if (empty($exists_in_review)) {
+				//delete from following
+				$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+				//delete eic comments
+				$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+				//delete from eic log
+				$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+				//delete in QC
+				$this->Qc->DeleteInQC($manuscript_id);
+				//delete in QC log
+				$this->Qc->DeleteInQCLog($manuscript_id);
+				//delete in review
+				$this->Review->DeleteInReview($manuscript_id);
+				$this->Review->deleteReviewByManuscriptId($manuscript_id);
+				//delete in QA
+				$this->Qa->DeleteDeclineRequest($manuscript_id);
+				//delete from Qa
+				$this->Qa->DeleteQAManuscript($manuscript_id);
+				//delete from Qa Log
+				$this->Qa->DeleteQAManuscriptLog($manuscript_id);
+				//delete in qa qa decline request
+				$this->Qa->DeleteDeclineRequestLog($manuscript_id);
+
+				//after add in eic initital scopic
+				$this->AddEicInitialScopic($manuscript_id);
+
+				$mdata['process_state'] = "eic initial scopic";
+				$msg = 'Admin has reverted (' . $ms->reference_number . ') into Eic Initial Scopic.';
+			} //if exists in ms_review
+		} else if ($ms_status == '__ARCHIVE_REQ_BY_JM__' || $ms_status == '__ARCHIVED_FROM_JM__') {
+			$mdata['process_state'] = "Manuscript in Review";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Editorial decision.';
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+
+			//if permanent delete
+			if ($ms->ms_status == '0') {
+				//Add In Manuscript in review
+				$MsInReview['manuscript_id'] = $manuscript_id;
+				$MsInReview['journal_id'] = $ms->journal_id;
+				$MsInReview['review_status'] = 0;
+				$MsInReview['decision_made_by'] = $this->session->userdata('id');
+				$MsInReview['ip_address'] = ip2long($this->input->ip_address());
+				$MsInReview['date_notified'] = time();
+
+				$this->Review->AddManuscriptInReview($MsInReview);
+
+				//Add In Manuscript in qc
+				$MsInQc['manuscript_id'] = $manuscript_id;
+				$MsInQc['journal_id'] = $ms->journal_id;
+				$MsInQc['status'] = 0;
+				$MsInQc['decision_made_by'] = $this->session->userdata('id');
+				$MsInQc['ip_address'] = ip2long($this->input->ip_address());
+				$MsInQc['date_notified'] = time();
+
+				$this->Qc->AddQcManuscript($MsInQc);
+
+				$mdata['revision_required'] = 0; // revision required
+			} //if permanent delete
+		} else if ($ms_status == '__QA_DECLINE__') {
+			$mdata['process_state'] = "Qa pending";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Qa pending.';
+
+			$this->Qa->UpdateQAManuscriptStatus('0', $manuscript_id);
+		} else if ($ms_status == '__QA_PENDING__') {
+			$mdata['process_state'] = "In-Verification";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into in-verification.';
+
+			$InVerification['journal_id'] = $ms->journal_id;
+			$InVerification['manuscript_id'] = $ms->manuscript_id;
+			$InVerification['verification_status'] = 0;
+			$InVerification['decision_made_by'] = $this->session->userdata('id');
+			$InVerification['verification_status'] = 0;
+			$InVerification['date_notified'] = time();
+			$InVerification['date_underway'] = time();
+
+			//add in verification
+			$this->Verification->AddMSInVerification($InVerification);
+			//delete in verification log
+			$this->Verification->DeleteInVerificationManuscriptLog($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+		}
+
+		//Update manuscript table
+		$mdata['lock_jm_opt'] = 0; // 1 is lock 0 is open
+		$mdata['lock_qa_opt'] = 1; // 1 is lock 0 is open
+		$mdata['status'] = 'A'; // 1 is lock 0 is open
+		$condition['manuscript_id'] = $manuscript_id;
+
+		//update manuscrip table
+		$this->Manuscript->updateManuscriptTable($condition, $mdata);
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+	} //RevertInGtDecision
+
+	function RevertInHtDecision($ms_status, $manuscript_id)
+	{
+		//Get By Manuscript ID
+		$ms = $this->Manuscript->getManuscriptById($manuscript_id);
+
+		$mdata['lock_jm_opt'] = 0; // 1 is lock 0 is open
+
+		if ($ms_status == '__ARCHIVE_REQ_BY_EIC__' || $ms_status == '__ARCHIVED_FROM_EIC__') {
+			//delete from following
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+
+			//after add in eic initital scopic
+			$this->AddEicInitialScopic($manuscript_id);
+
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Eic Initial Scopic.';
+
+			$mdata['process_state'] = "eic initial scopic";
+			$mdata['lock_jm_opt'] = 1; // 1 is lock 0 is open
+		} else if ($ms_status == '__ARCHIVE_REQ_BY_JM__' || $ms_status == '__ARCHIVED_FROM_JM__') {
+			$mdata['process_state'] = "Manuscript in Review";
+			$mdata['lock_jm_opt'] = 1; // 1 is lock 0 is open
+
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Editorial decision.';
+			//delete editors from editor assigned table
+			$this->Editor->deleteEditorByManuscriptId($manuscript_id);
+			//delete editor decision
+			$this->Editor->DeleteEditorDecision($manuscript_id);
+
+			//if permanent delete
+			if ($ms->ms_status == '0') {
+				//Add In Manuscript in review
+				$MsInReview['manuscript_id'] = $manuscript_id;
+				$MsInReview['journal_id'] = $ms->journal_id;
+				$MsInReview['review_status'] = 0;
+				$MsInReview['decision_made_by'] = $this->session->userdata('id');
+				$MsInReview['ip_address'] = ip2long($this->input->ip_address());
+				$MsInReview['date_notified'] = time();
+
+				$this->Review->AddManuscriptInReview($MsInReview);
+
+				$mdata['revision_required'] = 0; // revision required
+				$mdata['lock_jm_opt'] = 0; // 1 is lock 0 is open
+			} //if permanent delete
+		} else if ($ms_status == '__EIC_INITIAL_REJECT__') {
+			$mdata['process_state'] = "Eic initial scopic";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into eic initial scopic.';
+
+			$this->Eic_initial_scopic->DeleteEicManuscript($manuscript_id);
+			//delete eic comments
+			$this->Eic_initial_scopic->DeleteEicComments($manuscript_id);
+			//delete from eic log
+			$this->Eic_initial_scopic->DeleteEicInitialScopicLog($manuscript_id);
+			//delete in QC
+			$this->Qc->DeleteInQC($manuscript_id);
+			//delete in QC log
+			$this->Qc->DeleteInQCLog($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+			//delete from Qa Log
+			$this->Qa->DeleteQAManuscriptLog($manuscript_id);
+			//delete from decline request
+			$this->Qa->DeleteDeclineRequest($manuscript_id);
+			//delete in qa qa decline request
+			$this->Qa->DeleteDeclineRequestLog($manuscript_id);
+			//delete from in verification
+			$this->Verification->DeleteInVerificationManuscript($manuscript_id);
+			//after add in eic initital scopic
+			$this->AddEicInitialScopic($manuscript_id);
+		} else if ($ms_status == '__QA_DECLINE__') {
+			$mdata['process_state'] = "Qa pending";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into Qa pending.';
+
+			$this->Qa->UpdateQAManuscriptStatus('0', $manuscript_id);
+		} else if ($ms_status == '__QA_PENDING__') {
+			$mdata['process_state'] = "In-Verification";
+			$msg = 'Admin has reverted (' . $ms->reference_number . ') into in-verification.';
+
+			$InVerification['journal_id'] = $ms->journal_id;
+			$InVerification['manuscript_id'] = $ms->manuscript_id;
+			$InVerification['verification_status'] = 0;
+			$InVerification['decision_made_by'] = $this->session->userdata('id');
+			$InVerification['verification_status'] = 0;
+			$InVerification['date_notified'] = time();
+			$InVerification['date_underway'] = time();
+
+			//add in verification
+			$this->Verification->AddMSInVerification($InVerification);
+			//delete in verification log
+			$this->Verification->DeleteInVerificationManuscriptLog($manuscript_id);
+			//delete from Qa
+			$this->Qa->DeleteQAManuscript($manuscript_id);
+		}
+
+		//Update manuscript table
+		$mdata['lock_qa_opt'] = 1; // 1 is lock 0 is open
+		$mdata['status'] = 'A'; // 1 is lock 0 is open
+		$condition['manuscript_id'] = $manuscript_id;
+
+		//update manuscrip table
+		$this->Manuscript->updateManuscriptTable($condition, $mdata);
+
+		//Maintain event log
+		$this->CreateEventLog($msg, $manuscript_id);
+	} //RevertInHtDecision
+
+	function CreateEventLog($msg, $manuscript_id)
+	{
+		/***************************************************************************************************************/
+		//Start Maintain log here
+		/**************************************************************************************************************/
+		$event_log_data = array(
+			'manuscript_id' => $manuscript_id,
+			'message' => $msg,
+			'user_id' => $this->session->userdata('id'),
+			'date_logged' => time(),
+			'ip_address' => ip2long($this->input->ip_address())
+		);
+
+		$insert_log_id = $this->Notificationalerts->AddEventLog($event_log_data);
+
+		$notification_data = array(
+			'log_id' => $insert_log_id,
+			'user_role_id' => __journalmanager__,
+			'event_date' => time()
+		);
+		$this->Notificationalerts->AddNotification($notification_data);
+		/***************************************************************************************************************/
+		//End Maintain log here
+		/**************************************************************************************************************/
+	} //create event log
+
+	public function DownloadPDF($review_id, $type = "E")
+	{
+		$user_id = $this->session->userdata('id');
+		$data['type'] = $type;
+		$data['review'] = $review_detail = $this->Review->getReviewLogDetailById($review_id);
+		$ms_id = $review_detail->manuscript_id;
+		$data['manuscript'] = $this->Manuscript->getManuscriptById($ms_id);
+
+		$manuscript_author_data = $this->Manuscript->getManuscriptAuthorsList($ms_id);
+		$data['manuscript_auhtors'] = $manuscript_author_data;
+		//$data['review']    = $this->Review->getReviewLogDetailById($review_id);
+
+		//$data['associate'] = $this->Author->get_associate_user($ms_id);
+
+		if ($data['review']->date_completed != 0) {
+			$recommendationList = $this->Review->getReviewRecommendationList();
+			$data['recommendationList'] = $recommendationList;
+
+			$asd = __SITE_PATH__ . '/reviewforms/' . $data['manuscript']->review_form . '.php';
+
+			include __SITE_PATH__ . '/reviewforms/' . $data['manuscript']->review_form . '.php';
+			$data['review_form'] = $review_form;
+			$ReviewFormResponses = $this->Review->getReviewFormResponses($review_id);
+			$data['response'] = json_decode($ReviewFormResponses->response_value);
+
+			$data['review_detail'] = $review_detail;
+			$data['ReviewFormResponses'] = $ReviewFormResponses;
+			$ReviewerFiles = $this->Review->getManuscriptReviewerFiles($review_id);
+			$data['ReviewerFiles'] = $ReviewerFiles;
+			$data['RecommendationList'] = $recommendationList;
+		}
+
+		$html_code = $this->load->view('eic/ReviewResponsePDF', $data, true);
+
+		//this the the PDF filename that user will get to download
+		$pdfFilePath = "reviewform-" . time() . "-" . $review_id . ".pdf";
+
+		//actually, you can pass mPDF parameter on this load() function
+		$pdf = $this->m_pdf->load();
+
+		//generate the PDF!
+		$pdf->WriteHTML($html_code, 2);
+		//offer it to user via browser download! (The PDF won't be saved on your server HDD)
+		$pdf->Output($pdfFilePath, "D");
+	}
+
+	public function JournalWiseKPI($journal_id = '')
+	{
+		$journals = $this->Journal->getAllJournals();
+		$data['journals'] = $journals;
+
+		if (!empty($journal_id)) {
+			$data['journal_kpi'] = $this->Kpi->getJournalWiseKPI($journal_id);
+		}
+		$data['journal_id'] = $journal_id;
+
+		$this->load->template('admin/journalwise_kpi', $data);
+	}
+
+	public function saveJournalKPI()
+	{
+		$journal_id = $this->input->post('journal_id');
+		$measure_id = $this->input->post('measure_id');
+		$journal_expected_day = $this->input->post('journal_expected_day');
+
+		//delete previous kpi measures
+		//$this->Kpi->deleteJournalKPI($journal_id);
+
+		foreach ($measure_id as $key => $act) {
+			$data['journal_id'] = $journal_id;
+			$data['mid'] = $act;
+			$data['expected_days'] = $journal_expected_day[$key];
+			$journal_expected_day_id_exist = $journal_expected_day[$key];
+			if (!empty($journal_expected_day_id_exist)) {
+				$this->Kpi->insertJournalKPI($data);
+			}
+		}
+		redirect('/admin/Dashboard/JournalWiseKPI/' . trim($journal_id));
+	}
+
+	public function AddAuthor($reference_number = '', $manuscript_id = '', $author_id = '')
+	{
+		if ($reference_number == '') {
+			$reference_number = $this->input->post('reference_number');
+		}
+
+		if ($reference_number != "") {
+			$manuscript = $this->Manuscript->getManuscriptByReferenceNumber($reference_number);
+			$manuscript_author_data = $this->Manuscript->getManuscriptAuthorsList($manuscript->manuscript_id);
+			$data['manuscript_auhtors'] = $manuscript_author_data;
+
+			$array_aff = array();
+
+			foreach ($manuscript_author_data as $aff_data) {
+				$authors_aff = $this->Author->GetAuthorsAffliations($aff_data->author_id);
+				$array_aff[] = $authors_aff;
+			} //foreach loop used for extract affilitions
+
+			$data["aff_data"] = $array_aff;
+			$data['manuscript'] = $manuscript;
+			$data['countryList'] = $this->Article->getCountryList();
+			$data['gridCountryList'] = $this->Article->getGridCountryList();
+			$authors_data = $this->Author->GetManuscriptAuthor($author_id);
+			$author_aff_data = $this->Author->GetAuthorsAffliations($author_id);
+			$data['author_data'] = $authors_data;
+			$data['manuscript_id'] = $manuscript->manuscript_id;
+			$data['author_aff_data'] = $author_aff_data;
+		}
+
+		$data['reference_number'] = $reference_number;
+
+		// Get some data from the user's session
+		$this->load->template('admin/add_author', $data);
+	}
+
+	function AddAuthorDetails()
+	{
+		$page = $this->input->post('page');
+		$ms_id = $this->input->post('manuscript_id');
+
+		$user_id = $this->session->userdata('id');
+		$is_admin = $this->session->userdata('isAdmin');
+
+		$this->load->library('form_validation');
+		$this->load->helper('security');
+
+		$this->form_validation->set_rules('first_name', 'first name', 'trim|required|xss_clean');
+		$this->form_validation->set_rules('last_name', 'last name', 'trim|required|xss_clean');
+		$this->form_validation->set_rules('middle_name', 'middle name', 'trim|xss_clean');
+		$this->form_validation->set_rules('email', 'email', 'trim|required|xss_clean|valid_email');
+		$this->form_validation->set_rules('orcid', 'ORCID', 'trim|callback_valid_orcid');
+
+		$author_id = $this->input->post('author_id');
+
+		if (empty($author_id)) {
+			$this->form_validation->set_rules('email', 'Email', 'trim|required|valid_email');
+		}
+
+		if ($this->form_validation->run() == TRUE) {
+			if ($ms_id) {
+				$last_sequence = $this->Author->getLastAuhorsSequencesByMsid($ms_id);
+			}
+
+			if (!empty($author_id)) {
+				$add_author = array(
+					'manuscript_id' => $this->input->post('manuscript_id'),
+					'first_name' => $this->input->post('first_name'),
+					'last_name' => $this->input->post('last_name'),
+					'middle_name' => $this->input->post('middle_name'),
+					'email_address' => $this->input->post('email'),
+					'field_of_expertise' => $this->input->post('expertise'),
+					'orcid' => $this->input->post('orcid'),
+					'h_index' => $this->input->post('h_index'),
+					'updated_on' => time(),
+					'updated_by' => $user_id,
+					'ip' => ip2long($this->input->ip_address()),
+				);
+			} else {
+				$add_author = array(
+					'manuscript_id' => $this->input->post('manuscript_id'),
+					'first_name' => $this->input->post('first_name'),
+					'last_name' => $this->input->post('last_name'),
+					'middle_name' => $this->input->post('middle_name'),
+					'email_address' => $this->input->post('email'),
+					'field_of_expertise' => $this->input->post('expertise'),
+					'orcid' => $this->input->post('orcid'),
+					'h_index' => $this->input->post('h_index'),
+					'created_on' => time(),
+					'created_by' => $user_id,
+					'sequence' => $last_sequence->last_sequence + 1,
+					'ip' => ip2long($this->input->ip_address()),
+				);
+			} //else
+		} else {
+			$data['error'] = '';
+		}
+
+		if (isset($data['error'])) {
+			$manuscript_id = $this->input->post('manuscript_id');
+			$author_id = $this->input->post('author_id');
+			$scope = $this->input->post('scope');
+
+			$this->AddAuthor($manuscript_id, $author_id, $scope);
+		} else {
+			if (!empty($author_id)) {
+				$author_id = $this->Author->UpdateAuthorDetails($add_author, $this->input->post('author_id'));
+			} else {
+				$author_id = $this->Author->AddAuthorDetails($add_author);
+			}
+			// ************ADD  AUTHOR AFFILIATION DETAILS ************************//
+
+			$aff_data = array(
+				'inst' => $this->input->post('inst'),
+				'dept' => $this->input->post('dept'),
+				'city' => $this->input->post('city'),
+				'country' => $this->input->post('country'),
+				'phone' => $this->input->post('phone'),
+				'fax' => $this->input->post('fax'),
+				'postal' => $this->input->post('postal'),
+				'address' => $this->input->post('address'),
+				'author_id' => $author_id,
+			);
+
+			// $array_aff= array();
+
+			// for($i=1; $i<=$this->input->post('counter'); $i++)
+			// {
+			//     $aff="aff".$i;
+
+			//     $aff_data = array(
+			//         'dept'      => $this->input->post('dept'.$i),
+			//         'address'   => $this->input->post('address'.$i),
+			//         'phone'     => $this->input->post('phone'.$i),
+
+			//         'inst'      => $this->input->post('inst'.$i),
+
+			//         'city'      => $this->input->post('city'.$i),
+			//         'country'   => $this->input->post('country'.$i),
+
+			//         'fax'       => $this->input->post('fax'.$i),
+			//         'postal'    => $this->input->post('postal'.$i),
+
+			//         'author_id' => $author_id
+			//     );
+			//     $array_aff[$aff]=$aff_data;
+			// }//for loop extract aff
+
+			// var_dump($aff_data);die();
+
+			$this->InsertAuthorAffliation($aff_data);
+
+			// ************ ADD AFFILIATION DETAILS END ***************************//
+
+			$manuscript_data = $this->Manuscript->getManuscriptById($ms_id);
+
+			redirect('/admin/Dashboard/AddAuthor/' . $manuscript_data->reference_number);
+		} //else it is succesfully........
+	}
+
+	public function InsertAuthorAffliation($aff_data)
+	{
+		$data['author_id'] = $aff_data['author_id'];
+
+		$data['department'] = $aff_data['dept'];
+		$data['address'] = $aff_data['address'];
+		$data['phone'] = $aff_data['phone'];
+		$data['institution_id'] = $aff_data['inst'];
+		$data['postal_code'] = $aff_data['postal'];
+		$data['fax'] = $aff_data['fax'];
+
+		$institution_detail = $this->Article->GetInstituteDetail($data['institution_id']);
+
+		$data['institution'] = $institution_detail->name;
+		$data['country'] = $institution_detail->iso3;
+		$data['city'] = $institution_detail->city;
+		$data['state'] = $institution_detail->state;
+
+		$this->Author->InsertAuthorAffliation($data);
+	} //insert user affiliations
+
+	public function sequence_author($ms_id, $auth_id, $order)
+	{
+		if ($ms_id) {
+			$last_sequence = $this->Author->getLastAuhorsSequencesByMsid($ms_id);
+			$authors_seq = $this->Author->getAuhorsByMsid($ms_id);
+		}
+
+		if ($last_sequence->sequence == 0) {
+			foreach ($authors_seq as $key_seq => $author) {
+				$this->Author->update_author_sequence($ms_id, $author->author_id, $key_seq + 1);
+			}
+		}
+
+		$authors = $this->Author->getAuhorsByMsid($ms_id);
+
+		foreach ($authors as $key => $auth) {
+			if ($auth->manuscript_id == $ms_id && $auth->author_id == $auth_id) {
+				$fst_key = intval($key);
+			}
+		}
+
+		if ($order == 'inc') {
+			$sec_key = $fst_key + 1;
+		} elseif ($order == 'dec') {
+			$sec_key = $fst_key - 1;
+		}
+
+		if (array_key_exists($sec_key, $authors)) {
+			$fst_auth_id = $authors[$fst_key]->author_id;
+			$fst_auth_seq = $authors[$sec_key]->sequence;
+			$this->Author->update_author_sequence($ms_id, $fst_auth_id, $fst_auth_seq);
+
+			$sec_auth_id = $authors[$sec_key]->author_id;
+			$sec_auth_seq = $authors[$fst_key]->sequence;
+			$this->Author->update_author_sequence($ms_id, $sec_auth_id, $sec_auth_seq);
+		}
+		$manuscript = $this->Manuscript->getManuscriptById($ms_id);
+		redirect('/admin/Dashboard/AddAuthor/' . $manuscript->reference_number);
+	}
+
+	public function DeleteAuthor($author_id = '', $manuscript_id = '', $scope = '')
+	{
+		$this->Author->DeleteAuthor($author_id);
+		$manuscript = $this->Manuscript->getManuscriptById($manuscript_id);
+		redirect('/admin/Dashboard/AddAuthor/' . $manuscript->reference_number);
+	} //Delete Author
+
+	public function UpdateSingleAuthorAffliation($manuscript_id = '', $author_id = '')
+	{
+		$institution_id = $this->input->post('inst');
+		$institution_detail = $this->Article->GetInstituteDetail($institution_id);
+
+		$data = array(
+			'author_id' => $author_id,
+			'department' => $this->input->post('dept'),
+			'address' => $this->input->post('address'),
+			'phone' => $this->input->post('phone'),
+			'institution_id' => $institution_id,
+
+			'institution' => $institution_detail->name,
+			'country' => $institution_detail->iso3,
+			'city' => $institution_detail->city,
+			'state' => $institution_detail->state,
+
+			'postal_code' => $this->input->post('postal'),
+			'fax' => $this->input->post('fax'),
+		);
+
+		$this->Author->UpdateAuthorAffliation($data, $this->input->post('author_aff_id'));
+
+		$manuscript = $this->Manuscript->getManuscriptById($manuscript_id);
+		redirect('/admin/Dashboard/AddAuthor/' . $manuscript->reference_number . '/' . $manuscript_id . '/' . $author_id);
+	} //insert single author affiliations
+
+	public function DeleteAffiliation($manuscript_id = '', $author_id = '', $author_aff_id = '', $page = '')
+	{
+		$this->Author->DeleteAuthorAffiliation($author_aff_id);
+		$manuscript = $this->Manuscript->getManuscriptById($manuscript_id);
+		redirect('/admin/Dashboard/AddAuthor/' . $manuscript->reference_number);
+	}
+
+	function valid_orcid($orcid)
+	{
+		$regex = '/^[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}$/';
+
+		if (!empty($orcid)) {
+			preg_match($regex, $orcid, $matches);
+			if (count($matches) == 1) {
+				return true;
+			} else {
+				$this->form_validation->set_message('valid_orcid', 'invalid ORCID');
+				return false;
+			}
+		}
+	}
+
+	function manuscript_files()
+	{
+		$data = array();
+		$this->load->template('admin/manuscript_files', $data);
+	}
+
+	public function GetInvoiceList()
+	{
+
+		// check: if sub admin then redirect to dashboard
+		if (!isSuperAdmin()) {
+			return redirect('/admin/Dashboard/show_dashboard');
+		}
+
+
+		$pagename           = base_url('/admin/Dashboard/GetInvoiceList');
+		$config             = PaginationConfiguration($pagename);
+		$config['per_page'] = 20;
+		$page               = ($this->uri->segment(4)) ? $this->uri->segment(4) : 0;
+		$page               = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+
+		$config['total_rows'] = $this->InvoiceModel->GetInvoiceList('count');
+
+		$config['uri_segment'] = 4;
+
+		$choice              = $config['total_rows'] / $config['per_page'];
+
+		$config['num_links'] = 10;
+		$this->pagination->initialize($config);
+		$data['pagination'] = $this->pagination->create_links();
+
+		$invoice_detail = $this->InvoiceModel->GetInvoiceList('', $config['per_page'], $page);
+		// $invoice_detail = $this->InvoiceModel->GetInvoiceList();
+		$data['invoice_detail'] = $invoice_detail;
+
+		$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+		$data['invoice_type_list'] = $invoice_type_list;
+
+		$journal_list = $this->Journal->getJournalList();
+		$data['journal_list'] = $journal_list;
+
+		$data['payment_current_month'] = $this->InvoiceModel->GetPaymentRecieved(date('Y-m'), 'Complete');
+		$data['total_payment_recieved'] = $this->InvoiceModel->GetPaymentRecieved('', 'Complete');
+		$data['total_orders_in_pending'] = $this->InvoiceModel->GetTotalOrders('Pending');
+		$data['total_orders_payment_in_pending'] = $this->InvoiceModel->GetPaymentRecieved('', 'Pending');
+		$data['total_orders_in_ABC'] = $this->InvoiceModel->GetTotalOrders('Awaiting Bank Decision');
+		$data['total_orders_payment_in_ABC'] = $this->InvoiceModel->GetPaymentRecieved('', 'Awaiting Bank Decision');
+		$this->load->template('admin/view_invoice', $data);
+	}
+	//sabika 24 may 2021 start
+	public function CreateInvoice()
+	{
+		$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+		$data['invoice_type_list'] = $invoice_type_list;
+		//print_r($data); die;
+		$data['get_data_by_reference_number'] = "";
+		$data['no_manuscript'] = "";
+		$btn_search = $this->input->post('btn_search_reference');
+
+		if (isset($btn_search)) {
+
+			$search_refrence_number = $this->input->post('search_reference_number');
+			$get_data_by_reference_number = $this->Manuscript->getManuscriptByReferenceNumber($search_refrence_number);
+			if (!empty($get_data_by_reference_number)) {
+
+				if (($get_data_by_reference_number->submission_step == 0) && ($get_data_by_reference_number->manuscript_status == 'A')) {
+					//print_r($get_data_by_reference_number->manuscript_status); die;
+
+					$data['get_data_by_reference_number'] = $get_data_by_reference_number;
+				} else {
+					$this->session->set_flashdata('no_manuscript_exist', '<div class="alert alert-danger"  role="alert">Manuscript not found</div>');
+					redirect('admin/Dashboard/CreateInvoice');
+				}
+
+				$author_id = $get_data_by_reference_number->author_id;
+				$data['author_data'] = $this->Author->GetAuthorsAffliations($author_id);
+			} else
+			//if($data['get_data_by_reference_number'] == "")
+			{
+
+				$this->session->set_flashdata('no_manuscript_exist', '<div class="alert alert-danger"  role="alert">Manuscript not found</div>');
+				redirect('admin/Dashboard/CreateInvoice');
+			}
+		}
+
+		$this->load->template('admin/create_invoice', $data);
+	}
+
+	public function saveInvoice()
+	{
+		$invoice_type_id =  $this->input->post('invoice_type');
+		$actual_price   = $this->input->post('actual_price');
+		$discount   = $this->input->post('discount');
+		$manuscript_id = $this->input->post('manuscript_id');
+		$journal_id = $this->input->post('journal_id');
+
+		$invoice_type_name  = $this->InvoiceModel->GetInvoiceTypeDetailByID($invoice_type_id);
+		$manuscript = $this->Manuscript->getManuscriptById($manuscript_id);
+
+		$author_detail = $this->InvoiceModel->AuthorByManuscriptID($manuscript_id, $journal_id);
+
+		$vat_charges = "";
+		$gcc_country_check = $this->InvoiceModel->GetGccCountryList($author_detail->country);
+
+		//check manuscript id not equal to invoice type id 
+
+		$invoice_exit = $this->InvoiceModel->IsExistInvoice($manuscript_id, $journal_id, $invoice_type_id);
+
+		if (count($invoice_exit) > 0) {
+			$this->session->set_flashdata('manuscript_exist', '<div class="alert alert-danger"  role="alert">Invoice <b> ' . $invoice_type_name->invoice_type . '</b> already exist for  <b>' . $manuscript->reference_number . '</b></div>');
+			redirect('admin/Dashboard/CreateInvoice');
+		}
+
+		if ($gcc_country_check) {
+			$vat_charges = 0.05 * $actual_price;
+		} else {
+			$vat_charges = 0;
+		}
+
+		$total_amount = $actual_price;
+		$discounted_price = "";
+		if ($discount > 0) {
+			$discount_percentage = ($discount / $actual_price) * 100;
+			$discounted_price = $actual_price - $discount;
+			$total_amount = $actual_price - $discount + $vat_charges;
+		}
+
+		$invoice = array(
+			'invoice_id' => $invoice_id,
+			'manuscript_id' => $manuscript_id,
+			'journal_id' => $journal_id,
+			'actual_price' => $actual_price,
+			'discount' => round($discount_percentage, 2),
+			'discounted_price' => $discounted_price,
+			'vat_charges' => $vat_charges,
+			'total_amount' => $total_amount,
+			'invoice_date' => time(),
+			'invoice_type_id' =>  $this->input->post('invoice_type'),
+			'transaction_status' => $this->input->post('invoice_status'),
+			'comments' => $this->input->post('comments'),
+			'author_name' => $this->input->post('author_name'),
+			'author_email' => $this->input->post('author_email'),
+			'billing_address'    => $this->input->post('billing_address'),
+			'shipping_address'   => $this->input->post('shipping_address'),
+			'country' => $author_detail->country,
+			'ip_address' => ip2long($this->input->ip_address()),
+			'payment_mode' => $this->input->post('payment_mode'),
+		);
+
+		$invoice_id               = $this->InvoiceModel->InsertAuthorInvoice($invoice);
+
+		$invoice_type_detail      = $this->InvoiceModel->GetInvoiceTypeDetailByID($invoice_type_id);
+
+		$item_data[] = array(
+			'invoice_id'        =>  $invoice_id,
+			'invoice_type_id'   =>  $invoice_type_id,
+			'manuscript_id'     =>  $manuscript_id,
+			'item_desc'         =>  $invoice_type_detail->type_detail,
+			'qty'               =>  1,
+			'price'             =>  $total_amount
+		);
+		$this->InvoiceModel->InsertInvoiceItem($item_data);
+
+
+
+		$data['invoice_number'] = $invoice_type_detail->invoice_type . '-' . $invoice_id;
+		$updated_invoice_id = $this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $data);
+		$invoice_detail     = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+
+		$invoice_log = array(
+			'invoice_id'         => $invoice_id,
+			'invoice_number'     => $invoice_detail->invoice_number,
+			'manuscript_id'      => $manuscript_id,
+			'journal_id'         => $journal_id,
+			'actual_price'       => $invoice_detail->actual_price,
+			'vat_charges'        => $vat_charges,
+			'total_amount'       => $total_amount,
+			'invoice_date'       => time(),
+			'invoice_type_id'    => $invoice_detail->invoice_type_id,
+			'author_name'        => $author_name,
+			'author_email'       => $author_detail->email_address,
+			'billing_address'    => $billing_address,
+			'shipping_address'   => $billing_address,
+			'country'            => $author_detail->country,
+			'ip_address'         => ip2long($this->input->ip_address()),
+			'transaction_status' => $invoice_detail->transaction_status,
+			'updated_on'         => time(),
+			'transaction_detail' => 0,
+		);
+		$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_log);
+
+		//print_r($updated_invoice_id); die;
+		if (!empty($invoice_id)) {
+
+			$this->session->set_flashdata('invoice_save', '<div class="alert alert-success lead text-center"  role="alert">Invoice Create Succesfully</div>');
+
+			redirect('/admin/Dashboard/GetInvoiceList');
+		}
+	}
+	//sabika end
+	public function FindAuthorInvoice($a = 0, $b = 0, $c = 0, $d = 0, $e = 0, $f = 0, $g = 0, $h = 0, $i = 0, $j = 0)
+	{
+		$invoice_number = $this->input->post('invoice_number');
+		$refrence_number = trim($this->input->post('refrence_number'));
+		$a_name = trim($this->input->post('author_name'));
+		$author_name = strtolower($a_name);
+		$author_email = trim($this->input->post('author_email'));
+		$from_date = $this->input->post('from_date');
+		$to_date = $this->input->post('to_date');
+		$journal_id = $this->input->post('journal_id');
+		$invoice_status = $this->input->post('invoice_status');
+		$invoice_type = $this->input->post('article_type_id');
+		$qtp_type = $this->input->post('qtp_type');
+
+		$btn_export = $this->input->post('btn_export');
+		$btn_search = $this->input->post('btn_search');
+
+		if ($btn_export) {
+			//$invoice_detail = $this->InvoiceModel->GetInvoiceList();
+			$invoice_detail = $this->InvoiceModel->SearchAuthorInvoice($invoice_number, $refrence_number, $author_name, $author_email, $from_date, $to_date, $journal_id, $invoice_status, $invoice_type, $qtp_type);
+			// echo $invoice_detail[0]->invoice_id;
+			// var_dump($invoice_detail);
+			$table = "
+                  <table class='table table-bordered' border='1'>
+                    <tr>
+                      <th>Invoice#</th>
+                      <th>Journal</th>
+                      <th>Refrence#</th>
+                      <th>Article Title</th>
+                      <th>Author Name</th>
+                      <th>Author Email</th>
+                      <th>Bill Amnt</th>
+                      <th>Invoice Date</th>
+                      <th>Status</th>
+                    </tr>";
+			foreach ($invoice_detail as $row) {
+				// echo $row->invoice_id;
+				$table .= "
+                      <tr>
+                        <td>" . $row->invoice_number . "</td>
+                        <td>" . $row->journal_code . "</td>
+                        <td>" . $row->reference_number . "</td>
+                        <td>" . $row->title . "</td>
+                        <td>" . $row->author_name . "</td>
+                        <td>" . $row->author_email . "</td>
+                        <td>$" . $row->total_amount . "</td>
+                        <td>" . strftime('%d-%m-%Y', $row->invoice_date) . "</td>
+                        <td>" . $row->transaction_status . "</td>
+                      </tr>";
+			}
+
+			$table .= '</table>';
+			header("Content-type: application/vnd.ms-excel");
+			header("Content-Disposition: attachment; filename=invoice_list.xls");
+			echo $table;
+		}
+
+		if ($btn_search || $a || $b || $c || $d || $e || $f || $g || $h || $i || $j) {
+			if (empty($invoice_number) && empty($a)) {
+				$a = 0;
+			} elseif (!empty($invoice_number)) {
+				$a = $invoice_number;
+			}
+			if (!empty($a)) {
+				$invoice_number = $a;
+			}
+
+			if (empty($refrence_number) && empty($b)) {
+				$b = 0;
+			} elseif (!empty($refrence_number)) {
+				$b = $refrence_number;
+			}
+			if (!empty($b)) {
+				$refrence_number = $b;
+			}
+
+			if (empty($a_name) && empty($c)) {
+				$c = 0;
+			} elseif (!empty($a_name)) {
+				$c = $a_name;
+			}
+			if (!empty($c)) {
+				$a_name = $c;
+			}
+
+			if (empty($author_email) && empty($d)) {
+				$d = 0;
+			} elseif (!empty($author_email)) {
+				$d = $author_email;
+			}
+			if (!empty($d)) {
+				$author_email = $d;
+			}
+
+			if (empty($from_date) && empty($e)) {
+				$e = 0;
+			} elseif (!empty($from_date)) {
+				$e = $from_date;
+			}
+			if (!empty($e)) {
+				$from_date = $e;
+			}
+
+			if (empty($to_date) && empty($f)) {
+				$f = 0;
+			} elseif (!empty($to_date)) {
+				$f = $to_date;
+			}
+			if (!empty($f)) {
+				$to_date = $f;
+			}
+
+			if (empty($journal_id) && empty($g)) {
+				$g = 0;
+			} elseif (!empty($journal_id)) {
+				$g = $journal_id;
+			}
+			if (!empty($g)) {
+				$journal_id = $g;
+			}
+
+			if (empty($invoice_status) && empty($h)) {
+				$h = 0;
+			} elseif (!empty($invoice_status)) {
+				$h = $invoice_status;
+			}
+			if (!empty($h)) {
+				$invoice_status = $h;
+			}
+
+			if (empty($invoice_type) && empty($i)) {
+				$i = 0;
+			} elseif (!empty($invoice_type)) {
+				$i = $invoice_type;
+			}
+			if (!empty($i)) {
+				$invoice_type = $i;
+			}
+
+			if (empty($qtp_type) && empty($j)) {
+				$j = 0;
+			} elseif (!empty($qtp_type)) {
+				$j = $qtp_type;
+			}
+			if (!empty($j)) {
+				$qtp_type = $j;
+			}
+
+			$param = array(
+				'invoice_number' => $invoice_number,
+				'refrence_number' => $refrence_number,
+				'author_name' => $a_name,
+				'author_email' => $author_email,
+				'from_date' => $from_date,
+				'to_date' => $to_date,
+				'journal_id' => $journal_id,
+				'invoice_status' => $invoice_status,
+				'invoice_type' => $invoice_type,
+				'qtp_type' => $qtp_type,
+			);
+
+			$pagename           = base_url('/admin/Dashboard/FindAuthorInvoice/' . $a . '/' . $b . '/' . $c . '/' . $d . '/' . $e . '/' . $f . '/' . $g . '/' . $h . '/' . $i . '/' . $j . '/');
+			$config             = PaginationConfiguration($pagename);
+			$config['per_page'] = 20;
+			$page               = ($this->uri->segment(13)) ? $this->uri->segment(13) : 0;
+			$page               = (($page - 1) * $config['per_page']);
+			if ($page < 0) {
+				$page = 0;
+			}
+
+			$config['total_rows'] = $this->InvoiceModel->SearchAuthorInvoice($invoice_number, $refrence_number, $author_name, $author_email, $from_date, $to_date, $journal_id, $invoice_status, $invoice_type, $qtp_type, 'count');
+
+			$config['uri_segment'] = 13;
+
+			$choice              = $config['total_rows'] / $config['per_page'];
+
+			$config['num_links'] = 10;
+			$this->pagination->initialize($config);
+			$data['pagination'] = $this->pagination->create_links();
+
+			$data['param'] = $param;
+
+			$invoice_detail = $this->InvoiceModel->SearchAuthorInvoice($invoice_number, $refrence_number, $author_name, $author_email, $from_date, $to_date, $journal_id, $invoice_status, $invoice_type, $qtp_type, '', $config['per_page'], $page);
+
+			$data['invoice_detail'] = $invoice_detail;
+
+			$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+			$data['invoice_type_list'] = $invoice_type_list;
+
+			$journal_list = $this->Journal->getJournalList();
+			$data['journal_list'] = $journal_list;
+
+			$data['payment_current_month'] = $this->InvoiceModel->GetPaymentRecieved(date('Y-m'), 'Complete');
+			$data['total_payment_recieved'] = $this->InvoiceModel->GetPaymentRecieved('', 'Complete');
+			$data['total_orders_in_pending'] = $this->InvoiceModel->GetTotalOrders('Pending');
+			$data['total_orders_payment_in_pending'] = $this->InvoiceModel->GetPaymentRecieved('', 'Pending');
+			$data['total_orders_in_ABC'] = $this->InvoiceModel->GetTotalOrders('Awaiting Bank Decision');
+			$data['total_orders_payment_in_ABC'] = $this->InvoiceModel->GetPaymentRecieved('', 'Awaiting Bank Decision');
+
+			// var_dump($data);
+			$this->load->template('admin/view_invoice', $data);
+		}
+	}
+
+	public function AuthorInvoiceDownload($invoice_id)
+	{
+		$invoice_id = $this->encrypt->decode($invoice_id);
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+		$ms          = $this->Manuscript->getManuscriptById($invoice_detail->manuscript_id);
+
+		$data['invoice_detail'] = $invoice_detail;
+		$data['invoice_items'] = $invoice_items;
+
+		// $this->load->view('qamanager/author_invoice/update_invoice_email',$invoice_detail);
+		$html_code = $this->load->view('qamanager/author_invoice/update_invoice_email', $data, true);
+
+
+		$pdfFilePath = "invoice-" . time() . "-" . $invoice_id . ".pdf";
+
+		//actually, you can pass mPDF parameter on this load() function
+		$pdf = $this->m_pdf->load();
+
+		$stylesheet = file_get_contents('invoice.css'); // external css
+		$pdf = new mPDF('utf-8', 'A4', '', '', 3, 3, 3, 3, 0, 0);
+		$pdf->WriteHTML($stylesheet, 1);
+		$pdf->WriteHTML($html_code, 2);
+		//offer it to user via browser download! (The PDF won't be saved on your server HDD)
+		$pdf->Output($pdfFilePath, "D");
+	}
+
+	public function UpdateAuthorInvoice($invoice_id, $param = '')
+	{
+		$invoice_id = $this->encrypt->decode($invoice_id);
+
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$data['invoice_detail'] = $invoice_detail;
+
+		$data['check_ebm'] = $check_ebm = $this->Ebm->GetEBMbyManuscriptAuthor($invoice_detail->author_email);
+
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+		$data['invoice_items'] = $invoice_items;
+
+		$data['item_types'] = $this->InvoiceModel->GetInvoiceTypeList();
+
+		$email = $invoice_detail->author_email;
+
+		if ($invoice_detail->transaction_date == null) {
+			$data['transaction_date'] = "";
+		} else {
+			$data['transaction_date'] = date('Y-m-d', $invoice_detail->transaction_date);
+		}
+		$data['isEbm'] = $this->InvoiceModel->checkActiveEBM($email);
+
+		if ($invoice_detail->discounted_price != 0 || $invoice_detail->discount != 0) {
+			$total_amount = $invoice_detail->discounted_price;
+		} else {
+			$total_amount = $invoice_detail->actual_price;
+		}
+
+		$gcc_country_check = $this->InvoiceModel->GetGccCountryList($invoice_detail->country);
+
+		if (!empty($gcc_country_check)) {
+			$total_postage = 0.05 * $invoice_detail->actual_price;
+		} else {
+			$total_postage = 0;
+		}
+
+		$total = $total_amount + $total_postage;
+		$total_paid = 0;
+		$disounted_amount = 0;
+
+		$data['total_amount'] = $total_amount;
+		$data['total_paid'] = $total_paid;
+		$data['total_postage'] = $total_postage;
+		$data['total'] = $total;
+
+		$data['billing_address'] = $invoice_detail->billing_address;
+
+		if ($invoice_detail->discounted_price > 0 || $invoice_detail->discount != 0) {
+			$disounted_amount = $invoice_detail->actual_price - $invoice_detail->discounted_price;
+		}
+		$data['disounted_amount'] = $disounted_amount;
+		$data['param'] = $param;
+
+		$this->load->template('admin/update_invoice', $data);
+	}
+
+	public function UpdateInvoice()
+	{
+		$param = $this->input->post('param');
+		// var_dump($param);die();
+		$invoice_id = $this->input->post('invoice_number');
+		$transaction_status = $this->input->post('invoice_status');
+		$vat_charges = $this->input->post('vat_charges');
+		$author_name = $this->input->post('author_name');
+		$author_email = $this->input->post('author_email');
+		$transaction_date = $this->input->post('transaction_date');
+		$actual_price = $this->input->post('actual_price');
+		$discount = $this->input->post('discount');
+		$payment_mode = $this->input->post('payment_mode');
+		$billing_address = $this->input->post('billing_address');
+		$shipping_address = $this->input->post('shipping_address');
+		$comments = $this->input->post('comments');
+
+		if ($transaction_status == "Complete" && !empty($transaction_date)) {
+			$transaction_date = strtotime($transaction_date);
+		} else {
+			$transaction_date = null;
+		}
+
+		$mail_button = $this->input->post('btn_send_invoice_mail');
+		$update_button = $this->input->post('btn_update_invoice');
+		$cancel_button = $this->input->post('btn_cancel');
+
+		$discounted_price = 0;
+		if ($discount > 0) {
+			$discount_percentage = ($discount / $actual_price) * 100;
+			$discounted_price = $actual_price - $discount;
+			$total_amount = $actual_price - $discount + $vat_charges;
+		} else {
+			$total_amount = $actual_price + $vat_charges;
+		}
+
+
+		if ($mail_button) {
+			$param = $this->encrypt->encode($invoice_id);
+			$this->sendInvoiceEmail($param);
+			// $invoice_data['email_status']  = 1;
+			$invoice_data = array(
+				'transaction_status' => 'Pending',
+				'email_status' => 1,
+				'send_date' => time(),
+				'sender_id' => $this->session->userdata('id'),
+			);
+			$this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $invoice_data);
+			$invoice_detail = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+
+			$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_detail);
+
+			redirect('/admin/Dashboard/UpdateAuthorInvoice/' . $param);
+		}
+
+		if ($update_button) {
+
+			// if (empty($transaction_status)) {
+			// $invoice_detail = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+			// $transaction_status = $invoice_detail->transaction_status;
+			//} 
+
+			$invoice_data = array(
+				'actual_price'	=>	$actual_price,
+				'discount' => round($discount_percentage, 2),
+				'discounted_price' => $discounted_price,
+				'total_amount' => $total_amount,
+				'updated_on' => time(),
+				'comments' => nl2br($comments),
+				'author_name' => $author_name,
+				'author_email' => $author_email,
+				'billing_address' => nl2br($billing_address),
+				'shipping_address' => nl2br($shipping_address),
+				'payment_mode' => $payment_mode,
+				'transaction_status' => $transaction_status,
+				'transaction_date' => $transaction_date,
+			);
+
+			$this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $invoice_data);
+			$invoice_detail = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+			// var_dump($invoice_detail);die();			
+			$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_detail);
+
+			$getQTPinvoice = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+			$qtp_flag = 0;
+			if ($getQTPinvoice) {
+				foreach ($getQTPinvoice as $optservices) {
+					if ($optservices->invoice_type == 'QTP') {
+						$qtp_flag = 1;
+					}
+				}
+			}
+			if ($qtp_flag == 1 || (strpos($invoice_detail->invoice_number, 'BSP-QTP') !== false)) {
+				if ($invoice_detail->transaction_status == 'Complete') {
+					$qtpdata['quick_track'] = 5; //QTP invoice completed            
+				}
+				if ($invoice_detail->transaction_status == 'Commitment') {
+					$qtpdata['quick_track'] = 4; //QTP invoice Commitment received            
+				}
+				if ($invoice_detail->transaction_status == 'Awaiting Bank Decision') {
+					$qtpdata['quick_track'] = 3; //QTP invoice Awaiting Bank Decision            
+				}
+				if ($invoice_detail->transaction_status == 'Pending') {
+					$qtpdata['quick_track'] = 2; //QTP invoice Pending       
+				}
+				if ($invoice_detail->transaction_status == 'Cancel') {
+					$qtpdata['quick_track'] = 1; //QTP invoice Pending       
+				}
+				$qtpcondition['manuscript_id'] = $invoice_detail->manuscript_id;
+				$this->Manuscript->updateManuscriptTable($qtpcondition, $qtpdata);
+			}
+
+
+			// redirect('/qamanager/Invoice/UpdateAuthorInvoice/'.$this->encrypt->encode( $invoice_id));
+			redirect('/admin/Dashboard/UpdateAuthorInvoice/' . $this->encrypt->encode($invoice_id) . '/' . $param);
+		}
+
+		if ($cancel_button) {
+			redirect('/admin/Dashboard/GetInvoiceList/');
+		}
+		// var_dump($data);
+	}
+
+	public function sendInvoiceEmail($param)
+	{
+
+		$invoice_id = $this->encrypt->decode($param);
+
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$journal = $this->Journal->getJournalDataById($invoice_detail->journal_id);
+		$user_manager = $this->User->getUserDetailsByJournalId(__journalmanager__, $invoice_detail->journal_id);
+
+		$ms = $this->Manuscript->getManuscriptById($invoice_detail->manuscript_id);
+
+		$data['invoice_detail'] = $invoice_detail;
+
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+		$data['invoice_items'] = $invoice_items;
+
+		$to = $invoice_detail->author_email;
+		$from = 'leenamenon@benthamscience.net';
+
+		if ($this->input->post('email_subject')) {
+			$subject = $this->input->post('email_subject');
+		} else {
+			$subject =  'Publication Fee | ' . $invoice_detail->reference_number . ' | ' . $invoice_detail->invoice_number;
+		}
+
+		$message = "
+                    Dear " . $invoice_detail->author_name . ",<br><br>
+
+                    Please find below the invoice for your manuscript named as " . $ms->title . " .<br><br>
+
+                    Kindly remit the payment at the earliest.<br><br>
+
+                    You may pay below invoice by
+                    <a href='" . base_url() . "Paypal/CheckOut/" . $this->encrypt->encode($invoice_detail->invoice_id) . "' target='_blank'>Click Here</a><br><br>
+
+                    We thank you in advance, for your kind co-operation in the matter.<br><br>
+
+                    If you have any queries please do not hesitate to contact us.<br><br>
+                            Sincerely,<br><br>
+                            Leena Menon<br>
+                            BENTHAM SCIENCE PUBLISHERS<br>
+                            EXE.SUITE Y #2<br>
+                            SAIF ZONE, SHARJAH<br>
+                            UAE<br>
+                            TEL: 009716 5571132<br>
+                            FAX: 009716 5571134<br>
+                            leenamenon@benthamscience.net";
+		$message .= $this->load->view('qamanager/author_invoice/update_invoice_email', $data, true);
+
+		//echo $message;die();
+
+		$receiver_name = $invoice_detail->author_name;
+
+		$manager_name = 'Leena Menon';
+
+		$cc = $user_manager[0]->email . ',leenamenon@benthamscience.net, pradeepmenon@benthamscience.net, ambreenirshad@benthamscience.net, azhar@benthamscience.net';
+		$bcc = ''; //$journal->journal_principal_contact;
+
+		SendSmtpMail($to, $from, $subject, $message, $receiver_name, $manager_name, $cc, $bcc, '');
+		$emaildata = array(
+			'manuscript_id' => $invoice_detail->manuscript_id,
+			'activity_id' => 0,
+			'to_email' => $to,
+			'cc_email' => $cc,
+			'bcc_email' => $bcc,
+			'email_subject' => $subject,
+			'email_body' => $message,
+			'sender' => $this->session->userdata('id'),
+			'created_on' => time(),
+			'created_by' => $this->session->userdata('id'),
+			'updated_on' => time(),
+			'updated_by' => $this->session->userdata('id'),
+			'ip' => ip2long($this->input->ip_address()),
+		);
+		$this->EmailTemplate->SaveEmailPreview($emaildata);
+		unset($to, $from, $cc, $bcc, $subject, $message, $params, $receiver_name, $manager_name);
+	}
+
+	public function AddInvoiceItem()
+	{
+
+		$invoice_type_id =  $this->input->post('invoice_type_id');
+
+		$item_desc = $this->InvoiceModel->GetInvoiceTypeDetailByID($invoice_type_id);
+
+		$item_data[] = array(
+			'invoice_id'        =>  $this->input->post('invoice_id'),
+			'invoice_type_id'   =>  $this->input->post('invoice_type_id'),
+			'manuscript_id'     =>  $this->input->post('manuscript_id'),
+			'item_desc'         =>  $item_desc->type_detail,
+			'qty'               =>  1,
+			'price'             =>  $this->input->post('price'),
+			'discounted_price'  =>  $this->input->post('discounted_price'),
+			'discount'  		=>  $this->input->post('discounted_price') / $this->input->post('price')  * 100
+		);
+
+		$this->InvoiceModel->InsertInvoiceItem($item_data);
+		$invoice_id = $this->input->post('invoice_id');
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$gcc_country_check = $this->InvoiceModel->GetGccCountryList($invoice_detail->country);
+
+		if ($invoice_items) {
+			$sprice = 0;
+			$dprice = 0;
+			foreach ($invoice_items as $item) {
+				$sprice = $item->price + $sprice;
+				$dprice = $item->discounted_price + $dprice;
+			}
+
+			$actual_price = $sprice - $dprice;
+
+			if ($gcc_country_check) {
+				$vat_charges = 0.05 * $actual_price;
+			} else {
+				$vat_charges = 0;
+			}
+
+			$stotal_amount = $actual_price + $vat_charges;
+			$data['actual_price'] = $actual_price;
+			$data['total_amount'] = $stotal_amount;
+			$data['vat_charges'] = $vat_charges;
+
+			$updated_invoice_id = $this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $data);
+		}
+
+		$invoice_detail     = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+
+		$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_detail);
+
+		redirect('/admin/Dashboard/UpdateAuthorInvoice/' . $this->encrypt->encode($invoice_id));
+	}
+	public function UpdateInvoiceItem($invoice_item_id)
+	{
+
+		$invoice_type_id =  $this->input->post('invoice_type_id');
+		$item_desc = $this->InvoiceModel->GetInvoiceTypeDetailByID($invoice_type_id);
+		$item_data = array(
+			'invoice_item_id'   =>  $this->input->post('invoice_item_id'),
+			'invoice_type_id'   =>  $this->input->post('invoice_type_id'),
+			'item_desc'         =>  $item_desc->type_detail,
+			'price'             =>  $this->input->post('price'),
+			'discounted_price'  =>  $this->input->post('discounted_price'),
+			'discount'  		=>  $this->input->post('discounted_price') / $this->input->post('price')  * 100,
+			'item_status'       =>  $this->input->post('item_status')
+		);
+
+
+		$this->InvoiceModel->UpdateInvoiceItem($item_data);
+
+		$invoice_item_id = $this->input->post('invoice_item_id');
+
+		$itemdetail = $this->InvoiceModel->GetInvoiceItemById($invoice_item_id);
+		$invoice_id  = $itemdetail->invoice_id;
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$gcc_country_check = $this->InvoiceModel->GetGccCountryList($invoice_detail->country);
+
+
+		if ($invoice_items) {
+			$sprice = 0;
+			$dprice = 0;
+			foreach ($invoice_items as $item) {
+				$sprice = $item->price + $sprice;
+				$dprice = $item->discounted_price + $dprice;
+			}
+
+			$actual_price = $sprice - $dprice;
+
+			if ($gcc_country_check) {
+				$vat_charges = 0.05 * $actual_price;
+			} else {
+				$vat_charges = 0;
+			}
+
+			$stotal_amount = $actual_price + $vat_charges;
+			$data['actual_price'] = $actual_price;
+			$data['total_amount'] = $stotal_amount;
+			$data['vat_charges'] = $vat_charges;
+
+			$updated_invoice_id = $this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $data);
+		}
+
+		$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+
+		$invoice_detail     = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+
+		$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_detail);
+
+		redirect('/admin/Dashboard/UpdateAuthorInvoice/' . $this->encrypt->encode($invoice_id));
+	}
+
+	public function DeleteInvoiceItem($invoice_item_id)
+	{
+
+		$itemdetail = $this->InvoiceModel->GetInvoiceItemById($invoice_item_id);
+
+		$this->InvoiceModel->DeleteInvoiceItem($invoice_item_id);
+
+
+		$invoice_id  = $itemdetail->invoice_id;
+		$invoice_items = $this->InvoiceModel->GetInvoiceItemByInvoiceId($invoice_id);
+		$invoice_detail = $this->InvoiceModel->GetInvoiceByID($invoice_id);
+		$gcc_country_check = $this->InvoiceModel->GetGccCountryList($invoice_detail->country);
+
+		if ($invoice_items) {
+			$sprice = 0;
+			$dprice = 0;
+			foreach ($invoice_items as $item) {
+				$sprice = $item->price + $sprice;
+				$dprice = $item->discounted_price + $dprice;
+			}
+
+
+			$actual_price = $sprice - $dprice;
+
+			if ($gcc_country_check) {
+				$vat_charges = 0.05 * $actual_price;
+			} else {
+				$vat_charges = 0;
+			}
+
+			$stotal_amount = $actual_price + $vat_charges;
+			$data['actual_price'] = $actual_price;
+			$data['total_amount'] = $stotal_amount;
+			$data['vat_charges'] = $vat_charges;
+
+			$updated_invoice_id = $this->InvoiceModel->AuthorInvoiceUpdate($invoice_id, $data);
+		}
+
+		$invoice_detail     = $this->InvoiceModel->GetInvoiceDetailByID($invoice_id);
+
+		$invoice_log_id = $this->InvoiceModel->InsertAuthorInvoiceLog($invoice_detail);
+
+		redirect('/admin/Dashboard/UpdateAuthorInvoice/' . $this->encrypt->encode($invoice_id));
+	}
+
+	public function PublicationFee()
+	{
+		$pagename           = base_url('/admin/Dashboard/PublicationFee/');
+		$config             = PaginationConfiguration($pagename);
+		$config['per_page'] = 10;
+		$page               = ($this->uri->segment(4)) ? $this->uri->segment(4) : 0;
+		$page               = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+
+		$config['total_rows'] = $this->InvoiceModel->GetPublicationFeeList('count');
+
+		$config['uri_segment'] = 4;
+
+		$choice              = $config['total_rows'] / $config['per_page'];
+
+		$config['num_links'] = 5;
+		$this->pagination->initialize($config);
+		$data['pagination'] = $this->pagination->create_links();
+
+		$journal_list = $this->Journal->getJournalList();
+		$data['journal_list'] = $journal_list;
+
+		$article_types = $this->Article->getArticleTypeList();
+		$data['article_types'] = $article_types;
+
+		$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+		$data['invoice_type_list'] = $invoice_type_list;
+
+		$publication_fee_detail = $this->InvoiceModel->GetPublicationFeeList('', $config['per_page'], $page);
+		$data['publication_fee_detail'] = $publication_fee_detail;
+
+		// var_dump($data['publication_fee_detail']);die();
+		$this->load->template('admin/add_publication_fee', $data);
+	}
+
+	public function AddPublicationFee()
+	{
+		$journal = $this->input->post('journal');
+		$journal_detail = explode("_", $journal);
+		$journal_id = $journal_detail[0];
+		$journal_code = $journal_detail[1];
+
+		$article_type_id = $this->input->post('article_type_id');
+		$price = $this->input->post('price');
+		$applied_date = strtotime($this->input->post('applied_date'));
+		$invoice_type_id = $this->input->post('invoice_type_id');
+		$comments = $this->input->post('comments');
+
+		$data = array(
+			'journal_id'		=>	$journal_id,
+			'journal_code'		=>	$journal_code,
+			'article_type_id'	=>	$article_type_id,
+			'price'				=>	$price,
+			'applied_date'		=>	$applied_date,
+			'invoice_type_id'	=>	$invoice_type_id,
+			'comments'			=>	$comments
+		);
+
+		$publication_fee_id = $this->InvoiceModel->InsertPublicationFee($data);
+
+		$pub_fee_detail = $this->InvoiceModel->GetPublicationFeeByID($publication_fee_id);
+		$pub_fee_log_data = array(
+			'price_id'			=>	$pub_fee_detail->price_id,
+			'journal_id'		=>	$pub_fee_detail->journal_id,
+			'journal_code'		=>	$pub_fee_detail->journal_code,
+			'article_type_id'	=>	$pub_fee_detail->article_type_id,
+			'price'				=>	$pub_fee_detail->price,
+			'applied_date'		=>	$pub_fee_detail->applied_date,
+			'invoice_type_id'	=>	$pub_fee_detail->invoice_type_id,
+			'status'    		=>	$pub_fee_detail->status,
+			'updated_on'		=>	time()
+		);
+		$publication_fee_log_id = $this->InvoiceModel->InsertPublicationFeeLog($pub_fee_log_data);
+
+		$this->PublicationFee();
+	}
+
+	public function DeletePublicationFee()
+	{
+		$price_id = $this->input->post('price_id');
+		$data = array(
+			'price_id'	=>	$price_id,
+			'status'	=>	'D'
+		);
+
+		$this->InvoiceModel->UpdatePublicationFee($data);
+
+		$pub_fee_detail = $this->InvoiceModel->GetPublicationFeeByID($price_id);
+		$pub_fee_log_data = array(
+			'price_id'			=>	$pub_fee_detail->price_id,
+			'journal_id'		=>	$pub_fee_detail->journal_id,
+			'journal_code'		=>	$pub_fee_detail->journal_code,
+			'article_type_id'	=>	$pub_fee_detail->article_type_id,
+			'price'				=>	$pub_fee_detail->price,
+			'applied_date'		=>	$pub_fee_detail->applied_date,
+			'invoice_type_id'	=>	$pub_fee_detail->invoice_type_id,
+			'status'    		=>	$pub_fee_detail->status,
+			'updated_on'		=>	time()
+		);
+		$publication_fee_log_id = $this->InvoiceModel->InsertPublicationFeeLog($pub_fee_log_data);
+
+		$this->PublicationFee();
+	}
+
+	public function SearchPublicationFee($a = 0, $b = 0, $c = 0)
+	{
+		$journal = $this->input->post('journal');
+		$journal_detail = explode("_", $journal);
+		$journal_id = $journal_detail[0];
+		$journal_code = $journal_detail[1];
+
+		$article_type_id = $this->input->post('article_type_id');
+		$invoice_type_id = $this->input->post('invoice_type_id');
+
+		if (empty($journal_id) && empty($a)) {
+			$a = 0;
+		} elseif (!empty($journal_id)) {
+			$a = $journal_id;
+		}
+		if (!empty($a)) {
+			$journal_id = $a;
+		}
+
+		if (empty($article_type_id) && empty($b)) {
+			$b = 0;
+		} elseif (!empty($article_type_id)) {
+			$b = $article_type_id;
+		}
+		if (!empty($b)) {
+			$article_type_id = $b;
+		}
+
+		if (empty($invoice_type_id) && empty($c)) {
+			$c = 0;
+		} elseif (!empty($invoice_type_id)) {
+			$c = $invoice_type_id;
+		}
+		if (!empty($c)) {
+			$invoice_type_id = $c;
+		}
+
+		$param = array(
+			'journal_id'			=>	$journal_id,
+			'article_type_id'	=>	$article_type_id,
+			'invoice_type_id'	=>	$invoice_type_id
+		);
+
+		$pagename           = base_url('/admin/Dashboard/SearchPublicationFee/' . $a . '/' . $b . '/' . $c . '/');
+		$config             = PaginationConfiguration($pagename);
+		$config['per_page'] = 10;
+		$page               = ($this->uri->segment(7)) ? $this->uri->segment(7) : 0;
+		$page               = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+
+		$config['total_rows'] = $this->InvoiceModel->SearchPublicationFees($journal_id, $article_type_id, $invoice_type_id, 'count');
+
+		// echo $config['total_rows'];die();
+
+		$config['uri_segment'] = 7;
+
+		$choice              = $config['total_rows'] / $config['per_page'];
+
+		$config['num_links'] = 5;
+		$this->pagination->initialize($config);
+		$data['pagination'] = $this->pagination->create_links();
+
+		$data['param'] = $param;
+
+		$pub_fee_detail = $this->InvoiceModel->SearchPublicationFees($journal_id, $article_type_id, $invoice_type_id, '', $config['per_page'], $page);
+
+		$data['publication_fee_detail'] = $pub_fee_detail;
+
+		$journal_list = $this->Journal->getJournalList();
+		$data['journal_list'] = $journal_list;
+
+		$article_types = $this->Article->getArticleTypeList();
+		$data['article_types'] = $article_types;
+
+		$invoice_type_list = $this->InvoiceModel->GetInvoiceTypeList();
+		$data['invoice_type_list'] = $invoice_type_list;
+		// var_dump($data['publication_fee_detail']);
+
+		$this->load->template('admin/add_publication_fee', $data);
+	}
+
+	//set proposal closing date
+	public function addProposalDate()
+	{
+		$reference_number = $this->input->post('reference_number');
+		$btn_search = $this->input->post('search_ref_number');
+		if (isset($btn_search)) {
+			$data['reference_number'] = $reference_number;
+			$ms = $this->Manuscript->getManuscriptByReferenceNumber($reference_number);
+
+			if (!empty($ms) && $ms->manuscript_type == 'P') {
+				$data['ms'] = $ms;
+			} else {
+				$this->session->set_flashdata('msg', '<div class="alert alert-danger"  role="alert">Manuscript not found</div>');
+			}
+		}
+		$this->load->template('admin/add_proposal_closing_date', $data);
+	}
+
+	public function saveProposalDate()
+	{
+		$manuscript_id = $this->input->post('manuscript_id');
+		$update_date = $this->input->post('closing_date');
+
+		$updateClosingDate['proposal_closing_date'] = strtotime($update_date);
+		$proposalCondition['manuscript_id'] = $manuscript_id;
+		$this->Manuscript->updateManuscriptTable($proposalCondition, $updateClosingDate);
+		$this->session->set_flashdata('msg', '<div class="alert alert-success">Date update successfully!</div>');
+		$this->load->template('admin/add_proposal_closing_date');
+	}
+
+	/* Author   : 	Sameen 
+	   Date 	: 	11-May-2022
+	   Function : 	Invoice Report Summary Invoice Typewise */
+
+	public function GetInvoiceReport()
+	{
+
+		// check: if sub admin then redirect to dashboard
+		if (!isSuperAdmin()) {
+			return redirect('/admin/Dashboard/show_dashboard');
+		}
+
+		$search_year = $this->input->post('search_year');
+		$search_journal = $this->input->post('journal');
+
+
+		if (isset($search_journal)) {
+
+			$journal 	= $search_journal;
+		}
+
+
+		if (isset($search_year)) {
+			$year 	= $search_year;
+		} else {
+			$year = date('Y');
+		}
+
+
+		$data['search_year'] = $year;
+		$data['journal'] = $journal;
+
+		$from_date = '' . $year . '-01-01';
+		$to_date = '' . $year . '-12-31';
+
+		/*		 SUMMARY REPORT START		*/
+
+		$publication_fee_pending = $this->InvoiceModel->InvoiceReport('1', 'Pending', $from_date, $to_date, $journal);
+		$data['publication_fee_pending'] = $publication_fee_pending->amount;
+
+		// print_r($data['publication_fee_pending']); die;
+		$publication_fee_paid = $this->InvoiceModel->InvoiceReport('1', 'Complete', $from_date, $to_date, $journal);
+		$data['publication_fee_paid'] = $publication_fee_paid->amount;
+		$publication_fee_total = $publication_fee_pending->amount + $publication_fee_paid->amount;
+
+
+		$bentham_open_pending = $this->InvoiceModel->InvoiceReport('4', 'Pending', $from_date, $to_date, $journal);
+		$data['bentham_open_pending'] = $bentham_open_pending->amount;
+		$bentham_open_paid = $this->InvoiceModel->InvoiceReport('4', 'Complete', $from_date, $to_date, $journal);
+		$data['bentham_open_paid'] = $bentham_open_paid->amount;
+		$bentham_open_total = $bentham_open_pending->amount + $bentham_open_paid->amount;
+
+
+		$open_access_pending = $this->InvoiceModel->InvoiceReport('5', 'Pending', $from_date, $to_date, $journal);
+		$data['open_access_pending'] = $open_access_pending->amount;
+		$open_access_paid = $this->InvoiceModel->InvoiceReport('5', 'Complete', $from_date, $to_date, $journal);
+		$data['open_access_paid'] = $open_access_paid->amount;
+		$open_access_total = $open_access_pending->amount + $open_access_paid->amount;
+
+
+		$quick_track_pending = $this->InvoiceModel->InvoiceReport('8', 'Pending', $from_date, $to_date, $journal);
+		$data['quick_track_pending'] = $quick_track_pending->amount;
+		$quick_track_paid = $this->InvoiceModel->InvoiceReport('8', 'Complete', $from_date, $to_date, $journal);
+		$data['quick_track_paid'] = $quick_track_paid->amount;
+		$quick_track_total = $quick_track_pending->amount + $quick_track_paid->amount;
+
+		$copyediting_pending = $this->InvoiceModel->InvoiceReport('2', 'Pending', $from_date, $to_date, $journal);
+		$data['copyediting_pending'] = $copyediting_pending->amount;
+		$copyediting_paid = $this->InvoiceModel->InvoiceReport('2', 'Complete', $from_date, $to_date, $journal);
+		$data['copyediting_paid'] = $copyediting_paid->amount;
+		$copyediting_total = $copyediting_pending->amount + $copyediting_paid->amount;
+
+		$animated_video_pending = $this->InvoiceModel->InvoiceReport('7', 'Pending', $from_date, $to_date, $journal);
+		$data['animated_video_pending'] = $animated_video_pending->amount;
+		$animated_video_paid = $this->InvoiceModel->InvoiceReport('7', 'Complete', $from_date, $to_date, $journal);
+		$data['animated_video_paid'] = $animated_video_paid->amount;
+		$animated_video_total = $animated_video_pending->amount + $animated_video_paid->amount;
+
+		$recent_trend_pending = $this->InvoiceModel->InvoiceReport('9', 'Pending', $from_date, $to_date, $journal);
+		$data['recent_trend_pending'] = $recent_trend_pending->amount;
+		$recent_trend_paid = $this->InvoiceModel->InvoiceReport('9', 'Complete', $from_date, $to_date, $journal);
+		$data['recent_trend_paid'] = $recent_trend_paid->amount;
+		$recent_trend_total = $recent_trend_pending->amount + $recent_trend_paid->amount;
+
+
+		$data['bentham_open_total']		= $bentham_open_total;
+		$data['publication_fee_total']	= $publication_fee_total;
+		$data['open_access_total']		= $open_access_total;
+		$data['quick_track_total']		= $quick_track_total;
+		$data['copyediting_total']		= $copyediting_total;
+		$data['animated_video_total']	= $animated_video_total;
+		$data['recent_trend_total']	    = $recent_trend_total;
+
+
+		$data['total_pending'] = $bentham_open_pending->amount + $publication_fee_pending->amount + $open_access_pending->amount + $quick_track_pending->amount + $copyediting_pending->amount + $animated_video_pending->amount + $recent_trend_pending->amount;
+
+		$data['total_paid'] = $bentham_open_paid->amount + $publication_fee_paid->amount + $open_access_paid->amount + $quick_track_paid->amount + $copyediting_paid->amount + $animated_video_paid->amount + $recent_trend_paid->amount;
+
+		$data['total'] = $bentham_open_total + $publication_fee_total + $open_access_total + $quick_track_total + $copyediting_total + $animated_video_total + $recent_trend_total;
+
+		/*		SUMMARY REPORT END		*/
+
+		$param = array(
+			'from_date' => $from_date,
+			'to_date' => $to_date,
+			'journal' => $journal
+
+		);
+
+		$pending_invoice = $this->InvoiceModel->PendingInvoice($param);
+
+		$data['pending_invoice'] = $pending_invoice;
+
+		$paid_invoice = $this->InvoiceModel->PaidInvoice($param);
+
+		$data['paid_invoice'] = $paid_invoice;
+
+		$journal_list = $this->Journal->getJournalList();
+		$data['journal_list'] = $journal_list;
+
+
+		$this->load->template('admin/invoice_report', $data);
+	}
+
+	/* Author   : 	Sameen 
+	   Date 	: 	26-May-2022
+	   Function : 	Invoice Monthly Report Invoice Typewise*/
+
+	public function GetInvoiceMonthlyRevenue()
+	{
+
+		// check: if sub admin then redirect to dashboard
+		if (!isSuperAdmin()) {
+			return redirect('/admin/Dashboard/show_dashboard');
+		}
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31'
+		);
+
+		/* START APC MONTHLY INVOICE */
+
+		$apc_2022 = $this->InvoiceModel->InvoiceMonthlyRevenueApc($param);
+
+		$data['jan_2022'] = !empty($apc_2022[0]->total) ? $apc_2022[0]->total : 0;
+		$data['feb_2022'] = !empty($apc_2022[1]->total) ? $apc_2022[1]->total : 0;
+		$data['mar_2022'] = !empty($apc_2022[2]->total) ? $apc_2022[2]->total : 0;
+		$data['apr_2022'] = !empty($apc_2022[3]->total) ? $apc_2022[3]->total : 0;
+		$data['may_2022'] = !empty($apc_2022[4]->total) ? $apc_2022[4]->total : 0;
+		$data['jun_2022'] = !empty($apc_2022[5]->total) ? $apc_2022[5]->total : 0;
+		$data['jul_2022'] = !empty($apc_2022[6]->total) ? $apc_2022[6]->total : 0;
+		$data['aug_2022'] = !empty($apc_2022[7]->total) ? $apc_2022[7]->total : 0;
+		$data['sep_2022'] = !empty($apc_2022[8]->total) ? $apc_2022[8]->total : 0;
+		$data['oct_2022'] = !empty($apc_2022[9]->total) ? $apc_2022[9]->total : 0;
+		$data['nov_2022'] = !empty($apc_2022[10]->total) ? $apc_2022[10]->total : 0;
+		$data['dec_2022'] = !empty($apc_2022[11]->total) ? $apc_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31'
+		);
+
+		$apc_2021 = $this->InvoiceModel->InvoiceMonthlyRevenueApc($param);
+		$data['jan_2021'] = !empty($apc_2021[0]->total) ? $apc_2021[0]->total : 0;
+		$data['feb_2021'] = !empty($apc_2021[1]->total) ? $apc_2021[1]->total : 0;
+		$data['mar_2021'] = !empty($apc_2021[2]->total) ? $apc_2021[2]->total : 0;
+		$data['apr_2021'] = !empty($apc_2021[3]->total) ? $apc_2021[3]->total : 0;
+		$data['may_2021'] = !empty($apc_2021[4]->total) ? $apc_2021[4]->total : 0;
+		$data['jun_2021'] = !empty($apc_2021[5]->total) ? $apc_2021[5]->total : 0;
+		$data['jul_2021'] = !empty($apc_2021[6]->total) ? $apc_2021[6]->total : 0;
+		$data['aug_2021'] = !empty($apc_2021[7]->total) ? $apc_2021[7]->total : 0;
+		$data['sep_2021'] = !empty($apc_2021[8]->total) ? $apc_2021[8]->total : 0;
+		$data['oct_2021'] = !empty($apc_2021[9]->total) ? $apc_2021[9]->total : 0;
+		$data['nov_2021'] = !empty($apc_2021[10]->total) ? $apc_2021[10]->total : 0;
+		$data['dec_2021'] = !empty($apc_2021[11]->total) ? $apc_2021[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2020-01-01',
+			'to_date' => '2020-12-31'
+		);
+
+		$apc_2020 = $this->InvoiceModel->InvoiceMonthlyRevenueApc($param);
+
+		$data['jan_2020'] = !empty($apc_2020[0]->total) ? $apc_2020[0]->total : 0;
+		$data['feb_2020'] = !empty($apc_2020[1]->total) ? $apc_2020[1]->total : 0;
+		$data['mar_2020'] = !empty($apc_2020[2]->total) ? $apc_2020[2]->total : 0;
+		$data['apr_2020'] = !empty($apc_2020[3]->total) ? $apc_2020[3]->total : 0;
+		$data['may_2020'] = !empty($apc_2020[4]->total) ? $apc_2020[4]->total : 0;
+		$data['jun_2020'] = !empty($apc_2020[5]->total) ? $apc_2020[5]->total : 0;
+		$data['jul_2020'] = !empty($apc_2020[6]->total) ? $apc_2020[6]->total : 0;
+		$data['aug_2020'] = !empty($apc_2020[7]->total) ? $apc_2020[7]->total : 0;
+		$data['sep_2020'] = !empty($apc_2020[8]->total) ? $apc_2020[8]->total : 0;
+		$data['oct_2020'] = !empty($apc_2020[9]->total) ? $apc_2020[9]->total : 0;
+		$data['nov_2020'] = !empty($apc_2020[10]->total) ? $apc_2020[10]->total : 0;
+		$data['dec_2020'] = !empty($apc_2020[11]->total) ? $apc_2020[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2019-01-01',
+			'to_date' => '2019-12-31'
+		);
+
+		$apc_2019 = $this->InvoiceModel->InvoiceMonthlyRevenueApc($param);
+		$data['jan_2019'] = !empty($apc_2019[0]->total) ? $apc_2019[0]->total : 0;
+		$data['feb_2019'] = !empty($apc_2019[1]->total) ? $apc_2019[1]->total : 0;
+		$data['mar_2019'] = !empty($apc_2019[2]->total) ? $apc_2019[2]->total : 0;
+		$data['apr_2019'] = !empty($apc_2019[3]->total) ? $apc_2019[3]->total : 0;
+		$data['may_2019'] = !empty($apc_2019[4]->total) ? $apc_2019[4]->total : 0;
+		$data['jun_2019'] = !empty($apc_2019[5]->total) ? $apc_2019[5]->total : 0;
+		$data['jul_2019'] = !empty($apc_2019[6]->total) ? $apc_2019[6]->total : 0;
+		$data['aug_2019'] = !empty($apc_2019[7]->total) ? $apc_2019[7]->total : 0;
+		$data['sep_2019'] = !empty($apc_2019[8]->total) ? $apc_2019[8]->total : 0;
+		$data['oct_2019'] = !empty($apc_2019[9]->total) ? $apc_2019[9]->total : 0;
+		$data['nov_2019'] = !empty($apc_2019[10]->total) ? $apc_2019[10]->total : 0;
+		$data['dec_2019'] = !empty($apc_2019[11]->total) ? $apc_2019[11]->total : 0;
+
+
+		/*  END APC MONTHLY INVOICE */
+
+		/*  START BENTHAM MONTHLY INVOICE */
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31'
+		);
+
+		$bentham_2022 = $this->InvoiceModel->InvoiceMonthlyRevenueBentham($param);
+
+		$data['bentham_jan_2022'] = !empty($bentham_2022[0]->total) ? $bentham_2022[0]->total : 0;
+		$data['bentham_feb_2022'] = !empty($bentham_2022[1]->total) ? $bentham_2022[1]->total : 0;
+		$data['bentham_mar_2022'] = !empty($bentham_2022[2]->total) ? $bentham_2022[2]->total : 0;
+		$data['bentham_apr_2022'] = !empty($bentham_2022[3]->total) ? $bentham_2022[3]->total : 0;
+		$data['bentham_may_2022'] = !empty($bentham_2022[4]->total) ? $bentham_2022[4]->total : 0;
+		$data['bentham_jun_2022'] = !empty($bentham_2022[5]->total) ? $bentham_2022[5]->total : 0;
+		$data['bentham_jul_2022'] = !empty($bentham_2022[6]->total) ? $bentham_2022[6]->total : 0;
+		$data['bentham_aug_2022'] = !empty($bentham_2022[7]->total) ? $bentham_2022[7]->total : 0;
+		$data['bentham_sep_2022'] = !empty($bentham_2022[8]->total) ? $bentham_2022[8]->total : 0;
+		$data['bentham_oct_2022'] = !empty($bentham_2022[9]->total) ? $bentham_2022[9]->total : 0;
+		$data['bentham_nov_2022'] = !empty($bentham_2022[10]->total) ? $bentham_2022[10]->total : 0;
+		$data['bentham_dec_2022'] = !empty($bentham_2022[11]->total) ? $bentham_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31'
+		);
+
+		$bentham_2021 = $this->InvoiceModel->InvoiceMonthlyRevenueBentham($param);
+		$data['bentham_jan_2021'] = !empty($bentham_2021[0]->total) ? $bentham_2021[0]->total : 0;
+		$data['bentham_feb_2021'] = !empty($bentham_2021[1]->total) ? $bentham_2021[1]->total : 0;
+		$data['bentham_mar_2021'] = !empty($bentham_2021[2]->total) ? $bentham_2021[2]->total : 0;
+		$data['bentham_apr_2021'] = !empty($bentham_2021[3]->total) ? $bentham_2021[3]->total : 0;
+		$data['bentham_may_2021'] = !empty($bentham_2021[4]->total) ? $bentham_2021[4]->total : 0;
+		$data['bentham_jun_2021'] = !empty($bentham_2021[5]->total) ? $bentham_2021[5]->total : 0;
+		$data['bentham_jul_2021'] = !empty($bentham_2021[6]->total) ? $bentham_2021[6]->total : 0;
+		$data['bentham_aug_2021'] = !empty($bentham_2021[7]->total) ? $bentham_2021[7]->total : 0;
+		$data['bentham_sep_2021'] = !empty($bentham_2021[8]->total) ? $bentham_2021[8]->total : 0;
+		$data['bentham_oct_2021'] = !empty($bentham_2021[9]->total) ? $bentham_2021[9]->total : 0;
+		$data['bentham_nov_2021'] = !empty($bentham_2021[10]->total) ? $bentham_2021[10]->total : 0;
+		$data['bentham_dec_2021'] = !empty($bentham_2021[11]->total) ? $bentham_2021[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2020-01-01',
+			'to_date' => '2020-12-31'
+		);
+
+		$bentham_2020 = $this->InvoiceModel->InvoiceMonthlyRevenueBentham($param);
+
+		$data['bentham_jan_2020'] = !empty($bentham_2020[0]->total) ? $bentham_2020[0]->total : 0;
+		$data['bentham_feb_2020'] = !empty($bentham_2020[1]->total) ? $bentham_2020[1]->total : 0;
+		$data['bentham_mar_2020'] = !empty($bentham_2020[2]->total) ? $bentham_2020[2]->total : 0;
+		$data['bentham_apr_2020'] = !empty($bentham_2020[3]->total) ? $bentham_2020[3]->total : 0;
+		$data['bentham_may_2020'] = !empty($bentham_2020[4]->total) ? $bentham_2020[4]->total : 0;
+		$data['bentham_jun_2020'] = !empty($bentham_2020[5]->total) ? $bentham_2020[5]->total : 0;
+		$data['bentham_jul_2020'] = !empty($bentham_2020[6]->total) ? $bentham_2020[6]->total : 0;
+		$data['bentham_aug_2020'] = !empty($bentham_2020[7]->total) ? $bentham_2020[7]->total : 0;
+		$data['bentham_sep_2020'] = !empty($bentham_2020[8]->total) ? $bentham_2020[8]->total : 0;
+		$data['bentham_oct_2020'] = !empty($bentham_2020[9]->total) ? $bentham_2020[9]->total : 0;
+		$data['bentham_nov_2020'] = !empty($bentham_2020[10]->total) ? $bentham_2020[10]->total : 0;
+		$data['bentham_dec_2020'] = !empty($bentham_2020[11]->total) ? $bentham_2020[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2019-01-01',
+			'to_date' => '2019-12-31'
+		);
+
+		$bentham_2019 = $this->InvoiceModel->InvoiceMonthlyRevenueBentham($param);
+		$data['bentham_jan_2019'] = !empty($bentham_2019[0]->total) ? $bentham_2019[0]->total : 0;
+		$data['bentham_feb_2019'] = !empty($bentham_2019[1]->total) ? $bentham_2019[1]->total : 0;
+		$data['bentham_mar_2019'] = !empty($bentham_2019[2]->total) ? $bentham_2019[2]->total : 0;
+		$data['bentham_apr_2019'] = !empty($bentham_2019[3]->total) ? $bentham_2019[3]->total : 0;
+		$data['bentham_may_2019'] = !empty($bentham_2019[4]->total) ? $bentham_2019[4]->total : 0;
+		$data['bentham_jun_2019'] = !empty($bentham_2019[5]->total) ? $bentham_2019[5]->total : 0;
+		$data['bentham_jul_2019'] = !empty($bentham_2019[6]->total) ? $bentham_2019[6]->total : 0;
+		$data['bentham_aug_2019'] = !empty($bentham_2019[7]->total) ? $bentham_2019[7]->total : 0;
+		$data['bentham_sep_2019'] = !empty($bentham_2019[8]->total) ? $bentham_2019[8]->total : 0;
+		$data['bentham_oct_2019'] = !empty($bentham_2019[9]->total) ? $bentham_2019[9]->total : 0;
+		$data['bentham_nov_2019'] = !empty($bentham_2019[10]->total) ? $bentham_2019[10]->total : 0;
+		$data['bentham_dec_2019'] = !empty($bentham_2019[11]->total) ? $bentham_2019[11]->total : 0;
+
+
+		/*  END BENTHAM MONTHLY INVOICE */
+
+		/*  START OPEN ACCESS MONTHLY INVOICE */
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31',
+			'it_type_id' => '5'
+		);
+
+		$openaccess_2022 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+
+		$data['openaccess_jan_2022'] = !empty($openaccess_2022[0]->total) ? $openaccess_2022[0]->total : 0;
+		$data['openaccess_feb_2022'] = !empty($openaccess_2022[1]->total) ? $openaccess_2022[1]->total : 0;
+		$data['openaccess_mar_2022'] = !empty($openaccess_2022[2]->total) ? $openaccess_2022[2]->total : 0;
+		$data['openaccess_apr_2022'] = !empty($openaccess_2022[3]->total) ? $openaccess_2022[3]->total : 0;
+		$data['openaccess_may_2022'] = !empty($openaccess_2022[4]->total) ? $openaccess_2022[4]->total : 0;
+		$data['openaccess_jun_2022'] = !empty($openaccess_2022[5]->total) ? $openaccess_2022[5]->total : 0;
+		$data['openaccess_jul_2022'] = !empty($openaccess_2022[6]->total) ? $openaccess_2022[6]->total : 0;
+		$data['openaccess_aug_2022'] = !empty($openaccess_2022[7]->total) ? $openaccess_2022[7]->total : 0;
+		$data['openaccess_sep_2022'] = !empty($openaccess_2022[8]->total) ? $openaccess_2022[8]->total : 0;
+		$data['openaccess_oct_2022'] = !empty($openaccess_2022[9]->total) ? $openaccess_2022[9]->total : 0;
+		$data['openaccess_nov_2022'] = !empty($openaccess_2022[10]->total) ? $openaccess_2022[10]->total : 0;
+		$data['openaccess_dec_2022'] = !empty($openaccess_2022[11]->total) ? $openaccess_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31',
+			'it_type_id' => '5'
+		);
+
+		$openaccess_2021 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+		$data['openaccess_jan_2021'] = !empty($openaccess_2021[0]->total) ? $openaccess_2021[0]->total : 0;
+		$data['openaccess_feb_2021'] = !empty($openaccess_2021[1]->total) ? $openaccess_2021[1]->total : 0;
+		$data['openaccess_mar_2021'] = !empty($openaccess_2021[2]->total) ? $openaccess_2021[2]->total : 0;
+		$data['openaccess_apr_2021'] = !empty($openaccess_2021[3]->total) ? $openaccess_2021[3]->total : 0;
+		$data['openaccess_may_2021'] = !empty($openaccess_2021[4]->total) ? $openaccess_2021[4]->total : 0;
+		$data['openaccess_jun_2021'] = !empty($openaccess_2021[5]->total) ? $openaccess_2021[5]->total : 0;
+		$data['openaccess_jul_2021'] = !empty($openaccess_2021[6]->total) ? $openaccess_2021[6]->total : 0;
+		$data['openaccess_aug_2021'] = !empty($openaccess_2021[7]->total) ? $openaccess_2021[7]->total : 0;
+		$data['openaccess_sep_2021'] = !empty($openaccess_2021[8]->total) ? $openaccess_2021[8]->total : 0;
+		$data['openaccess_oct_2021'] = !empty($openaccess_2021[9]->total) ? $openaccess_2021[9]->total : 0;
+		$data['openaccess_nov_2021'] = !empty($openaccess_2021[10]->total) ? $openaccess_2021[10]->total : 0;
+		$data['openaccess_dec_2021'] = !empty($openaccess_2021[11]->total) ? $openaccess_2021[11]->total : 0;
+
+		/*  END OPEN ACCESS MONTHLY INVOICE */
+
+		/*  START QUICK TRACK MONTHLY INVOICE */
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31',
+			'it_type_id' => '8'
+		);
+
+		$quicktrack_2022 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+
+		$data['quicktrack_jan_2022'] = !empty($quicktrack_2022[0]->total) ? $quicktrack_2022[0]->total : 0;
+		$data['quicktrack_feb_2022'] = !empty($quicktrack_2022[1]->total) ? $quicktrack_2022[1]->total : 0;
+		$data['quicktrack_mar_2022'] = !empty($quicktrack_2022[2]->total) ? $quicktrack_2022[2]->total : 0;
+		$data['quicktrack_apr_2022'] = !empty($quicktrack_2022[3]->total) ? $quicktrack_2022[3]->total : 0;
+		$data['quicktrack_may_2022'] = !empty($quicktrack_2022[4]->total) ? $quicktrack_2022[4]->total : 0;
+		$data['quicktrack_jun_2022'] = !empty($quicktrack_2022[5]->total) ? $quicktrack_2022[5]->total : 0;
+		$data['quicktrack_jul_2022'] = !empty($quicktrack_2022[6]->total) ? $quicktrack_2022[6]->total : 0;
+		$data['quicktrack_aug_2022'] = !empty($quicktrack_2022[7]->total) ? $quicktrack_2022[7]->total : 0;
+		$data['quicktrack_sep_2022'] = !empty($quicktrack_2022[8]->total) ? $quicktrack_2022[8]->total : 0;
+		$data['quicktrack_oct_2022'] = !empty($quicktrack_2022[9]->total) ? $quicktrack_2022[9]->total : 0;
+		$data['quicktrack_nov_2022'] = !empty($quicktrack_2022[10]->total) ? $quicktrack_2022[10]->total : 0;
+		$data['quicktrack_dec_2022'] = !empty($quicktrack_2022[11]->total) ? $quicktrack_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31',
+			'it_type_id' => '8'
+		);
+
+		$quicktrack_2021 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+		$data['quicktrack_jan_2021'] = !empty($quicktrack_2021[0]->total) ? $quicktrack_2021[0]->total : 0;
+		$data['quicktrack_feb_2021'] = !empty($quicktrack_2021[1]->total) ? $quicktrack_2021[1]->total : 0;
+		$data['quicktrack_mar_2021'] = !empty($quicktrack_2021[2]->total) ? $quicktrack_2021[2]->total : 0;
+		$data['quicktrack_apr_2021'] = !empty($quicktrack_2021[3]->total) ? $quicktrack_2021[3]->total : 0;
+		$data['quicktrack_may_2021'] = !empty($quicktrack_2021[4]->total) ? $quicktrack_2021[4]->total : 0;
+		$data['quicktrack_jun_2021'] = !empty($quicktrack_2021[5]->total) ? $quicktrack_2021[5]->total : 0;
+		$data['quicktrack_jul_2021'] = !empty($quicktrack_2021[6]->total) ? $quicktrack_2021[6]->total : 0;
+		$data['quicktrack_aug_2021'] = !empty($quicktrack_2021[7]->total) ? $quicktrack_2021[7]->total : 0;
+		$data['quicktrack_sep_2021'] = !empty($quicktrack_2021[8]->total) ? $quicktrack_2021[8]->total : 0;
+		$data['quicktrack_oct_2021'] = !empty($quicktrack_2021[9]->total) ? $quicktrack_2021[9]->total : 0;
+		$data['quicktrack_nov_2021'] = !empty($quicktrack_2021[10]->total) ? $quicktrack_2021[10]->total : 0;
+		$data['quicktrack_dec_2021'] = !empty($quicktrack_2021[11]->total) ? $quicktrack_2021[11]->total : 0;
+
+		/*  END QUICK TRACK MONTHLY INVOICE */
+
+		/*  START  COPY EDITING MONTHLY INVOICE */
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31',
+			'it_type_id' => '2'
+		);
+
+		$copyediting_2022 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+
+		$data['copyediting_jan_2022'] = !empty($copyediting_2022[0]->total) ? $copyediting_2022[0]->total : 0;
+		$data['copyediting_feb_2022'] = !empty($copyediting_2022[1]->total) ? $copyediting_2022[1]->total : 0;
+		$data['copyediting_mar_2022'] = !empty($copyediting_2022[2]->total) ? $copyediting_2022[2]->total : 0;
+		$data['copyediting_apr_2022'] = !empty($copyediting_2022[3]->total) ? $copyediting_2022[3]->total : 0;
+		$data['copyediting_may_2022'] = !empty($copyediting_2022[4]->total) ? $copyediting_2022[4]->total : 0;
+		$data['copyediting_jun_2022'] = !empty($copyediting_2022[5]->total) ? $copyediting_2022[5]->total : 0;
+		$data['copyediting_jul_2022'] = !empty($copyediting_2022[6]->total) ? $copyediting_2022[6]->total : 0;
+		$data['copyediting_aug_2022'] = !empty($copyediting_2022[7]->total) ? $copyediting_2022[7]->total : 0;
+		$data['copyediting_sep_2022'] = !empty($copyediting_2022[8]->total) ? $copyediting_2022[8]->total : 0;
+		$data['copyediting_oct_2022'] = !empty($copyediting_2022[9]->total) ? $copyediting_2022[9]->total : 0;
+		$data['copyediting_nov_2022'] = !empty($copyediting_2022[10]->total) ? $copyediting_2022[10]->total : 0;
+		$data['copyediting_dec_2022'] = !empty($copyediting_2022[11]->total) ? $copyediting_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31',
+			'it_type_id' => '2'
+		);
+
+		$copyediting_2021 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+		$data['copyediting_jan_2021'] = !empty($copyediting_2021[0]->total) ? $copyediting_2021[0]->total : 0;
+		$data['copyediting_feb_2021'] = !empty($copyediting_2021[1]->total) ? $copyediting_2021[1]->total : 0;
+		$data['copyediting_mar_2021'] = !empty($copyediting_2021[2]->total) ? $copyediting_2021[2]->total : 0;
+		$data['copyediting_apr_2021'] = !empty($copyediting_2021[3]->total) ? $copyediting_2021[3]->total : 0;
+		$data['copyediting_may_2021'] = !empty($copyediting_2021[4]->total) ? $copyediting_2021[4]->total : 0;
+		$data['copyediting_jun_2021'] = !empty($copyediting_2021[5]->total) ? $copyediting_2021[5]->total : 0;
+		$data['copyediting_jul_2021'] = !empty($copyediting_2021[6]->total) ? $copyediting_2021[6]->total : 0;
+		$data['copyediting_aug_2021'] = !empty($copyediting_2021[7]->total) ? $copyediting_2021[7]->total : 0;
+		$data['copyediting_sep_2021'] = !empty($copyediting_2021[8]->total) ? $copyediting_2021[8]->total : 0;
+		$data['copyediting_oct_2021'] = !empty($copyediting_2021[9]->total) ? $copyediting_2021[9]->total : 0;
+		$data['copyediting_nov_2021'] = !empty($copyediting_2021[10]->total) ? $copyediting_2021[10]->total : 0;
+		$data['copyediting_dec_2021'] = !empty($copyediting_2021[11]->total) ? $copyediting_2021[11]->total : 0;
+
+		/*  END COPYEDITING MONTHLY INVOICE */
+
+		/*  START  ANIMATED MONTHLY INVOICE */
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31',
+			'it_type_id' => '7'
+		);
+
+		$animated_2022 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+
+		$data['animated_jan_2022'] = !empty($animated_2022[0]->total) ? $animated_2022[0]->total : 0;
+		$data['animated_feb_2022'] = !empty($animated_2022[1]->total) ? $animated_2022[1]->total : 0;
+		$data['animated_mar_2022'] = !empty($animated_2022[2]->total) ? $animated_2022[2]->total : 0;
+		$data['animated_apr_2022'] = !empty($animated_2022[3]->total) ? $animated_2022[3]->total : 0;
+		$data['animated_may_2022'] = !empty($animated_2022[4]->total) ? $animated_2022[4]->total : 0;
+		$data['animated_jun_2022'] = !empty($animated_2022[5]->total) ? $animated_2022[5]->total : 0;
+		$data['animated_jul_2022'] = !empty($animated_2022[6]->total) ? $animated_2022[6]->total : 0;
+		$data['animated_aug_2022'] = !empty($animated_2022[7]->total) ? $animated_2022[7]->total : 0;
+		$data['animated_sep_2022'] = !empty($animated_2022[8]->total) ? $animated_2022[8]->total : 0;
+		$data['animated_oct_2022'] = !empty($animated_2022[9]->total) ? $animated_2022[9]->total : 0;
+		$data['animated_nov_2022'] = !empty($animated_2022[10]->total) ? $animated_2022[10]->total : 0;
+		$data['animated_dec_2022'] = !empty($animated_2022[11]->total) ? $animated_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31',
+			'it_type_id' => '7'
+		);
+
+		$animated_2021 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+		$data['animated_jan_2021'] = !empty($animated_2021[0]->total) ? $animated_2021[0]->total : 0;
+		$data['animated_feb_2021'] = !empty($animated_2021[1]->total) ? $animated_2021[1]->total : 0;
+		$data['animated_mar_2021'] = !empty($animated_2021[2]->total) ? $animated_2021[2]->total : 0;
+		$data['animated_apr_2021'] = !empty($animated_2021[3]->total) ? $animated_2021[3]->total : 0;
+		$data['animated_may_2021'] = !empty($animated_2021[4]->total) ? $animated_2021[4]->total : 0;
+		$data['animated_jun_2021'] = !empty($animated_2021[5]->total) ? $animated_2021[5]->total : 0;
+		$data['animated_jul_2021'] = !empty($animated_2021[6]->total) ? $animated_2021[6]->total : 0;
+		$data['animated_aug_2021'] = !empty($animated_2021[7]->total) ? $animated_2021[7]->total : 0;
+		$data['animated_sep_2021'] = !empty($animated_2021[8]->total) ? $animated_2021[8]->total : 0;
+		$data['animated_oct_2021'] = !empty($animated_2021[9]->total) ? $animated_2021[9]->total : 0;
+		$data['animated_nov_2021'] = !empty($animated_2021[10]->total) ? $animated_2021[10]->total : 0;
+		$data['animated_dec_2021'] = !empty($animated_2021[11]->total) ? $animated_2021[11]->total : 0;
+
+		/*  END ANIMATED MONTHLY INVOICE */
+
+		/*  START  RECENT TRENDS  MONTHLY INVOICE */
+
+		$param = array(
+			'from_date' => '2022-01-01',
+			'to_date' => '2022-12-31',
+			'it_type_id' => '9'
+		);
+
+		$trends_2022 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+
+		$data['trends_jan_2022'] = !empty($trends_2022[0]->total) ? $trends_2022[0]->total : 0;
+		$data['trends_feb_2022'] = !empty($trends_2022[1]->total) ? $trends_2022[1]->total : 0;
+		$data['trends_mar_2022'] = !empty($trends_2022[2]->total) ? $trends_2022[2]->total : 0;
+		$data['trends_apr_2022'] = !empty($trends_2022[3]->total) ? $trends_2022[3]->total : 0;
+		$data['trends_may_2022'] = !empty($trends_2022[4]->total) ? $trends_2022[4]->total : 0;
+		$data['trends_jun_2022'] = !empty($trends_2022[5]->total) ? $trends_2022[5]->total : 0;
+		$data['trends_jul_2022'] = !empty($trends_2022[6]->total) ? $trends_2022[6]->total : 0;
+		$data['trends_aug_2022'] = !empty($trends_2022[7]->total) ? $trends_2022[7]->total : 0;
+		$data['trends_sep_2022'] = !empty($trends_2022[8]->total) ? $trends_2022[8]->total : 0;
+		$data['trends_oct_2022'] = !empty($trends_2022[9]->total) ? $trends_2022[9]->total : 0;
+		$data['trends_nov_2022'] = !empty($trends_2022[10]->total) ? $trends_2022[10]->total : 0;
+		$data['trends_dec_2022'] = !empty($trends_2022[11]->total) ? $trends_2022[11]->total : 0;
+
+		$param = array(
+			'from_date' => '2021-01-01',
+			'to_date' => '2021-12-31',
+			'it_type_id' => '9'
+		);
+
+		$trends_2021 = $this->InvoiceModel->InvoiceMonthlyRevenue($param);
+		$data['trends_jan_2021'] = !empty($trends_2021[0]->total) ? $trends_2021[0]->total : 0;
+		$data['trends_feb_2021'] = !empty($trends_2021[1]->total) ? $trends_2021[1]->total : 0;
+		$data['trends_mar_2021'] = !empty($trends_2021[2]->total) ? $trends_2021[2]->total : 0;
+		$data['trends_apr_2021'] = !empty($trends_2021[3]->total) ? $trends_2021[3]->total : 0;
+		$data['trends_may_2021'] = !empty($trends_2021[4]->total) ? $trends_2021[4]->total : 0;
+		$data['trends_jun_2021'] = !empty($trends_2021[5]->total) ? $trends_2021[5]->total : 0;
+		$data['trends_jul_2021'] = !empty($trends_2021[6]->total) ? $trends_2021[6]->total : 0;
+		$data['trends_aug_2021'] = !empty($trends_2021[7]->total) ? $trends_2021[7]->total : 0;
+		$data['trends_sep_2021'] = !empty($trends_2021[8]->total) ? $trends_2021[8]->total : 0;
+		$data['trends_oct_2021'] = !empty($trends_2021[9]->total) ? $trends_2021[9]->total : 0;
+		$data['trends_nov_2021'] = !empty($trends_2021[10]->total) ? $trends_2021[10]->total : 0;
+		$data['trends_dec_2021'] = !empty($trends_2021[11]->total) ? $trends_2021[11]->total : 0;
+
+		/*  END RECENT TRENDS MONTHLY INVOICE */
+
+		$this->load->template('admin/invoice_monthly_report', $data);
+	}
+
+	/* 
+	AUTHOR : SAMEEN
+	DATE : 23-JUNE-2022
+	FUNCTION : SEND REVIEWER CERTIFICATE FOR USER ADMIN
+	*/
+
+	public function ReviewerCertificateAdmin($email)
+	{
+
+		$search_email = trim($this->input->post('search_email'));
+
+		$data['email_filter'] = $search_email;
+
+		if (!empty($search_email)) {
+
+			$user = $this->User->searchUsersByEmail('u.user_id desc', '', '', '', '', $search_email);
+
+			$reviewer = $this->Reviewer->getReviewersList("",  "", "A",  "",  null,  null,  null, $search_email);
+
+			$data['reviewer'] = $reviewer[0];
+
+			$user_id = ($user[0]->user_id);
+
+			$certificate_history = $this->Reviewer->get_reviewer_certificate_history($user_id);
+
+			$data['certificate_history'] = $certificate_history;
+		}
+
+		if ($email == '1') {
+			$data['email'] = "Reviewer Certificate has been sent successfully.";
+		}
+		if ($email == '0') {
+			$data['empty'] = "No email found.";
+		}
+
+		$this->load->template('admin/send_reviewer_certificate', $data);
+	}
+
+	public function sendReviewerCertificateAdmin()
+	{
+
+		$email = $this->input->post('email');
+
+		$reviewers = $this->Reviewer->get_reviewer_log_admin($email);
+
+		if (!empty($reviewers)) {
+
+			$cron_count = 0;
+
+			foreach ($reviewers as $reviewer) {
+				if ($reviewer->cnt >= 1 and $reviewer->cnt <= 10) {
+					$image = base_url() . 'certificate/approved.jpg';
+				} elseif ($reviewer->cnt > 10) {
+					$image = base_url() . 'certificate/outstanding.jpg';
+				}
+
+				$genereate_pdf = false;
+
+				if (($reviewer->cnt >= 1 and $reviewer->cnt <= 10)) {
+					$genereate_pdf = true;
+				} elseif ($reviewer->cnt > 10) {
+					$genereate_pdf = true;
+				}
+
+				$pdfFilePath = '';
+				$certificate_html = '';
+				$pdfdoc = '';
+
+				if ($genereate_pdf == true) {
+					//genereate Certificate PDF
+					$certificate_html = '<link href="https://fonts.googleapis.com/css?family=Quintessential&display=swap" rel="stylesheet">';
+					$certificate_html .= '<style>h1{font-family:"Quintessential",cursive; font-weight:normal;color:#333;}</style>';
+					$certificate_html .= '<table width="850" border="0" align="center" cellpadding="0" cellspacing="0" style="background:url(' . $image . ') center top no-repeat;">
+				<tr><td>&nbsp;</td><td height="410">&nbsp;</td><td>&nbsp;</td></tr><tr><td width="190">&nbsp;</td>
+				<td width="600" height="60" align="center"><h1>' . ucwords($reviewer->first_name) . ' ' . ucwords($reviewer->last_name) . '</h1></td><td width="60">&nbsp;</td></tr>
+				<tr><td>&nbsp;</td><td height="172">&nbsp;</td><td>&nbsp;</td></tr></table>';
+
+					$pdfFilePath = __SITE_PATH__ . "/certificate/pdf/certificate.pdf";
+					$pdf = $this->m_pdf->Cload();
+					$pdf->WriteHTML($certificate_html, 0);
+					//$pdf->Output($pdfFilePath);
+
+					$pdfdoc = $pdf->Output($pdfFilePath, 'S');
+					$attachment[0]['filename'] = $pdfFilePath;
+					$attachment[0]['pdf'] = $pdfdoc;
+				}
+
+				// Send Email
+				$from = 'admin@bentham.manuscriptpoint.com';
+				$to = $reviewer->email;
+				$subject = "Reviewer Recognition Certificate";
+
+				if ($reviewer->cnt >= 1 and $reviewer->cnt <= 10) {
+					$message = "Dear Dr. " . ucwords($reviewer->first_name) . ' ' . ucwords($reviewer->last_name) . ",
+							<br><br>
+							Thank you for reviewing papers submitted for publication at Bentham Science Publishers. Your help and efforts in
+							reviewing manuscripts have contributed in the publication of quality science. In recognition of your services as
+							a reviewer, we would like to reward you with a Certificate of Acknowledgement (enclosed).
+							<br><br>
+							We hope to have a successful collaboration with you in the future as well.
+							<br><br>
+							M. Alam <br>
+							Director (Publication)<br>
+							Bentham Science
+							";
+				} elseif ($reviewer->cnt > 10) {
+					$message = "Dear Dr. " . ucwords($reviewer->first_name) . ' ' . ucwords($reviewer->last_name) . ",
+							<br><br>
+							Thank you for kindly reviewing papers for publication at Bentham Science Publishers. Your help and efforts in reviewing
+							manuscripts have contributed in the publication of quality science. In recognition of your outstanding contribution as
+							a reviewer, we would like to reward you with a Certificate of Acknowledgement (enclosed).
+							<br><br>
+							We hope to have a successful collaboration with you in the future as well.
+							<br><br>
+							M. Alam <br>
+							Director (Publication) <br>
+							Bentham Science 							
+							";
+				}
+
+				$receiver_name = $reviewer->first_name . ' ' . $reviewer->last_name;
+				$manager_name = 'admin';
+
+				$send_email = false;
+
+
+				if ($reviewer->cnt >= 1 and $reviewer->cnt <= 10) {
+					$log = '';
+					$log['reviewer_user_id'] = $reviewer->reviewer_user_id;
+					$log['points'] = $reviewer->cnt;
+					$log['date_assigned'] = time();
+					$log['last_modified'] = time();
+
+					$this->Reviewer->insert_certificate_log($log);
+					$send_email = true;
+					$cron_count = $cron_count + 1;
+				} elseif ($reviewer->cnt > 10) {
+					$log = '';
+					$log['reviewer_user_id'] = $reviewer->reviewer_user_id;
+					$log['points'] = 0;
+					$log['outstanding'] = $reviewer->cnt;
+					$log['date_assigned'] = time();
+					$log['last_modified'] = time();
+
+					$this->Reviewer->insert_certificate_log($log);
+					$send_email = true;
+					$cron_count = $cron_count + 1;
+				}
+
+
+				if ($send_email == true) {
+					SendSmtpMailWithAttachment($to, $from, $subject, $message, $receiver_name, $manager_name, $cc, $bcc, $attachment);
+					redirect('/admin/Dashboard/ReviewerCertificateAdmin/1');
+				}
+			}
+		} else {
+			redirect('/admin/Dashboard/ReviewerCertificateAdmin/0');
+		}
+	}
+
+
+	/* 
+	END SEND REVIEWER CERTIFICATE FOR USER ADMIN
+	*/
+
+
+	//  getAuthorDetailsbyEmail function Start
+
+	public function getAuthorDetailsbyEmail($Email = '')
+	{
+		$decryptEmail = $this->encrypt->decode($Email);
+		if (empty($Email)) {
+			$data['authorEmail'] = $authorEmail = $this->input->post('authorEmail');
+		} else {
+			$data['authorEmail'] = $authorEmail = $decryptEmail;
+		}
+		$encryptEmail = $this->encrypt->encode($authorEmail);
+
+		$pagename = base_url('/admin/Dashboard/getAuthorDetailsbyEmail/' . $encryptEmail);
+		$config = PaginationConfiguration($pagename);
+		$page = ($this->uri->segment(5)) ? $this->uri->segment(5) : 0;
+		$page = (($page - 1) * $config['per_page']);
+		if ($page < 0) {
+			$page = 0;
+		}
+		$config['total_rows'] = $this->Author->GetAuthorDetailsbyEmail($authorEmail, 'count', '', '');
+		$config['uri_segment'] = 5;
+		$config['per_page'] = 10;
+		$config['num_links'] = 10;
+		$this->pagination->initialize($config);
+
+		$data['pagination'] = $this->pagination->create_links();
+
+		$authorsDetails = $this->Author->GetAuthorDetailsbyEmail($authorEmail, '', $config['per_page'], $page);
+		$data['authors'] = $authorsDetails;
+
+		$this->load->template('admin/authorsDetailsByEmail',array_merge($data,$config));
+	}
+
+	//  getAuthorDetailsbyEmail function End
+
+}

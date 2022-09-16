@@ -1,0 +1,1179 @@
+<?php
+
+
+
+
+
+class Author extends CI_Model
+{
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :  
+
+		Desc   :this function add author details
+
+	*/
+
+
+
+
+
+	function AddAuthorDetails($add_author)
+	{
+		$this->db->insert(__TABLE_AUTHORS__, $add_author);
+		$insert_id = $this->db->insert_id();
+		return $insert_id;
+	}
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :  
+
+		Desc   :this function update author details
+
+	*/
+
+
+
+
+
+	function UpdateAuthorDetails($add_author, $author_id)
+	{
+
+
+
+		$result = $this->db->update(__TABLE_AUTHORS__, $add_author, array('author_id' => $author_id));
+
+		return $author_id;
+	}
+
+
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :  
+
+		Desc   :this function update eic status and commnts
+
+	*/
+
+
+
+
+
+	function UpdateEICManuscriptData($data, $manuscript_id = '')
+	{
+
+
+
+		$result = $this->db->update(__TABLE_INITIAL_SCOPIC__, $data, array('manuscript_id' => $manuscript_id));
+
+		return $manuscript_id;
+	}
+
+
+
+
+
+
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :  
+
+		Desc   :this function delete author details
+
+	*/
+
+
+
+
+
+
+
+
+
+
+
+	function DeleteAuthor($author_id)
+	{
+
+
+
+		//$data=array('status'=>'D','updated_on'=>time());
+		$data = array('status' => 'D', 'updated_on' => time(), 'updated_by' => $this->session->userdata('id'));
+
+		$this->db->where('author_id', $author_id);
+
+		return $this->db->update(__TABLE_AUTHORS__, $data);
+
+		//print $this->db->last_query();exit;
+
+	}
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :  
+
+		Desc   :this function delete author affilations details
+
+	*/
+
+
+
+
+
+
+
+
+
+
+
+	function DeleteAuthorAffiliation($author_id)
+	{
+
+
+
+		$this->db->where('aff_id', $author_id);
+
+		$this->db->delete(__TABLE_AUTHORS_AFF__);
+	}
+
+
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  : add_author_aff
+
+		Desc   :this function add author affiliations
+
+	*/
+
+
+
+
+
+	function InsertAuthorAffliation($add_author_aff)
+	{
+
+
+
+		$this->db->insert(__TABLE_AUTHORS_AFF__, $add_author_aff);
+
+		$insert_id = $this->db->insert_id();
+
+		return $insert_id;
+	}
+
+
+
+
+
+	function associate_user($data)
+	{
+
+
+
+		$this->db->insert(__TABLE_ASSOCIATE__, $data);
+
+		$insert_id = $this->db->insert_id();
+
+		return $insert_id;
+	}
+
+
+
+	function update_associate_user($assoc, $ms_id, $user_id)
+
+	{
+
+		$this->db->where('manuscript_id', $ms_id);
+
+		$this->db->where('user_id', $user_id);
+
+		return $this->db->update(__TABLE_ASSOCIATE__, $assoc);
+	}
+
+
+
+	function get_associate_user($ms_id = '', $auth_id = '', $user_id = '')
+	{
+
+
+
+		$this->db->select('*');
+
+		$this->db->from(__TABLE_ASSOCIATE__);
+
+		if (!empty($ms_id)) {
+			$this->db->where('manuscript_id', $ms_id);
+		}
+
+		if (!empty($auth_id)) {
+			$this->db->where('author_id', $auth_id);
+		}
+
+		if (!empty($user_id)) {
+			$this->db->where('user_id', $user_id);
+		}
+
+		$query = $this->db->get();
+
+		return $query->result();
+	}
+
+
+
+
+
+	function get_associate_manuscript($user_id = '')
+	{
+
+
+
+		$this->db->select('*')->from(__TABLE_ASSOCIATE__ . ' as a');
+
+		$this->db->join(__TABLE_MANUSCRIPT__ . ' as m', 'm.manuscript_id = a.manuscript_id', 'inner');
+
+		$this->db->join(__TABLE_JOURNALS__ . ' j ', ' j.journal_id = m.journal_id ', 'inner');
+
+		if (!empty($ms_id)) {
+			$this->db->where('a.manuscript_id', $ms_id);
+		}
+
+		if (!empty($auth_id)) {
+			$this->db->where('a.author_id', $auth_id);
+		}
+
+		if (!empty($user_id)) {
+			$this->db->where('a.user_id', $user_id);
+		}
+
+		$query = $this->db->get();
+
+		return $query->result();
+	}
+
+
+
+
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  : add_author_aff
+
+		Desc   :this function update author affiliations
+
+	*/
+
+
+
+
+
+	function UpdateAuthorAffliation($add_author_aff = '', $author_aff_id = '')
+	{
+
+
+
+		$this->db->where('aff_id', $author_aff_id);
+
+		return $this->db->update(__TABLE_AUTHORS_AFF__, $add_author_aff);
+	}
+
+
+
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  :author_id
+
+		Desc   :this function get Author Details
+
+	*/
+
+
+
+
+
+	function GetAuthorDetails($author_id = '')
+	{
+
+
+
+		$this->db->select('*')->from(__TABLE_AUTHORS__);
+
+		$this->db->where('author_id', $author_id);
+
+		$query = $this->db->get();
+
+
+
+		return $query->result();
+	}
+
+
+
+
+
+
+
+
+
+
+
+	/*
+
+		Date    :03-01-17
+
+		Author :Ishaq
+
+		Param  :user_id => pass current login user,scope => (submit-1,reject-11,await-2) 
+
+		Desc   :this function show initital scopic
+
+	*/
+
+
+
+	function GetInitialScopic($user_id = '', $scope = '', $manuscript_id = '')
+	{
+
+
+
+		$this->db->select('j.journal_title, j.journal_code,m.abstract,m.runninghead,m.manuscript_type, 		                          				  		m.reference_number,m.title,m.created_on,m.manuscript_id,a.first_name,a.last_name,ic.*')->from(__TABLE_INITIAL_SCOPIC__ . ' as ic');
+
+		$this->db->join(__TABLE_MANUSCRIPT__ . ' as m', 'm.manuscript_id=ic.manuscript_id', 'inner');
+
+		$this->db->join(__TABLE_JOURNALS__ . ' as j', 'j.journal_id=ic.journal_id', 'inner');
+
+		$this->db->join(__TABLE_AUTHORS__ . ' as a', 'a.manuscript_id=ic.manuscript_id', 'inner');
+
+		$this->db->join(__TABLE_ASSIGN_JOURNAL__ . ' as aj', 'aj.journal_id=ic.journal_id', 'inner');
+
+		$this->db->join(__TABLE_USERS__ . ' as u', 'aj.user_id=u.user_id and ic.journal_id=aj.journal_id and ic.initial_scopic_status=' . $scope, 'inner');
+
+		$this->db->where('u.user_id', $user_id);
+
+
+
+		if (!empty($manuscript_id)) {
+
+			$this->db->where('m.manuscript_id', $manuscript_id);
+		}
+
+
+
+		$query = $this->db->get();
+
+
+
+		// echo $this->db->last_query(); exit;
+
+
+
+		return $query->result();
+	} //get_initial_scopic 
+
+
+
+
+
+
+
+
+
+	/*
+
+		Date   :04-01-17
+
+		Author :Ishaq
+
+		Param  :$data,$eic_init_id
+
+		Desc   :this function show initital scopic
+
+	*/
+
+
+
+
+
+	function UpdateEicData($data, $eic_init_id)
+	{
+
+
+
+		$result = $this->db->update(__TABLE_INITIAL_SCOPIC__, $data, array('eic_initial_id' => $eic_init_id));
+
+		return $result;
+	}
+
+
+
+
+
+
+
+
+
+	/*
+
+		Date   :05-01-17
+
+		Author :Ishaq
+
+		Param  : manuscript_id 
+
+		Desc   :this function get authors related manuscript
+
+	*/
+
+	public function GetManuscriptAuthors($manuscript_id = '', $param = null)
+	{
+
+		$this->db->select('*')->from(__TABLE_AUTHORS__ . ' a');
+		$this->db->select('IFNULL((select count(*) from ' . __TABLE_ACTIVE_EBM__ . ' ebm where ebm.email = a.email_address AND ebm.role !="Reviewer"),0) as is_ebm');
+		$this->db->where('a.manuscript_id', $manuscript_id);
+
+		$this->db->where('a.status = "A" ');
+
+		if (!empty($param['order'])) {
+			$this->db->order_by($param['order']);
+		} else {
+			$this->db->order_by("a.sequence");
+		}
+
+		$query = $this->db->get();
+
+		return $query->result();
+	}
+
+
+
+
+
+	/*
+
+		Date   :05-01-17
+
+		Author :Ishaq
+
+		Param  : manuscript_id 
+
+		Desc   :this function get main author 
+
+	*/
+
+
+
+
+
+	function GetManuscriptPrincipalAuthor($manuscript_id = '')
+	{
+
+
+		if (!empty($manuscript_id)) {
+
+
+			$this->db->select('*')->from(__TABLE_AUTHORS__);
+
+			$this->db->where('is_principal', '1');
+
+			$this->db->where('manuscript_id', $manuscript_id);
+
+			$this->db->where(' status = "A" ');
+
+			//echo $this->db->get_compiled_select();exit;	
+
+
+
+			$query = $this->db->get();
+
+			return $query->row();
+		}
+	}
+
+
+
+	/*
+
+		Date   :05-01-17
+
+		Author :Ishaq
+
+		Param  : author_id 
+
+		Desc   :this function get authors Affiliation
+
+	*/
+
+
+
+
+
+	function GetAuthorsAffliations($author_id = '')
+	{
+
+
+
+		$this->db->select('af.*,c.nicename as country_name,c.iso3')->from(__TABLE_AUTHORS__ . ' as a');
+
+		$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'af.author_id=a.author_id', 'inner');
+		$this->db->join(__TABLE_COUNTRY__ . ' as c', 'c.iso3 = af.country', 'left');
+
+		$this->db->where('af.author_id', $author_id);
+
+
+
+		$query = $this->db->get();
+
+		return $query->result();
+	}
+	/*
+		Date   :27-06-2018
+		Author :Arshad
+		Param  : Country 
+		Desc   :this function check author Country where it is not in European countires list
+	*/
+	function checkAuthorInEUCountryList($iso3)
+	{
+
+		$this->db->select('e.ISO3')->from('european_countries as e');
+		$this->db->where('e.ISO3', $iso3);
+		return $this->db->count_all_results();
+
+		//echo $this->db->get_compiled_select(); die;
+	}
+
+
+	/*
+
+		Date   :09-01-17
+
+		Author :Ishaq
+
+		Param  : author_id 
+
+		Desc   :this function get authors Affiliation
+
+	*/
+
+
+
+
+
+	function GetManuscriptAuthor($author_id = '')
+	{
+
+
+
+		$this->db->select('a.*')->from(__TABLE_AUTHORS__ . ' as a');
+
+		$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'a.author_id=af.author_id', 'left');
+
+		$this->db->where('a.author_id', $author_id);
+
+		$query = $this->db->get();
+
+
+
+		return $query->result();
+	}
+
+
+
+
+
+	public function getAuhorsAffiliationByAuthorId($auth_id)
+
+	{
+		$this->db->select('*')->from(__TABLE_AUTHORS_AFF__ . ' as a');
+		$this->db->join(__TABLE_COUNTRY__ . ' as c', 'c.iso3=a.country', 'left');
+		$this->db->where('a.author_id', $auth_id);
+		$this->db->order_by("a.aff_id", "asc");
+		$affliations = $this->db->get()->result();
+
+		if ($this->db->affected_rows() > 0) {
+
+			return $affliations;
+		} else {
+
+			return false;
+		}
+	}
+
+
+
+
+
+	public function add_author($data)
+
+	{
+
+		$insert_query = $this->db->insert_string(__TABLE_AUTHORS__, $data);
+
+		$insert_query = str_replace('INSERT INTO', 'INSERT IGNORE INTO', $insert_query);
+
+		$this->db->query($insert_query);
+
+		$last_id = $this->db->insert_id();
+
+		return $last_id;
+	}
+
+	public function update_author($data, $auth_id)
+
+	{
+
+		$this->db->where('author_id', $auth_id);
+
+		$this->db->update(__TABLE_AUTHORS__, $data);
+	}
+
+
+
+	public function add_author_affiliation($data)
+
+	{
+
+		$insert_query = $this->db->insert_string(__TABLE_AUTHORS_AFF__, $data);
+
+		$insert_query = str_replace('INSERT INTO', 'INSERT IGNORE INTO', $insert_query);
+
+		$this->db->query($insert_query);
+	}
+
+
+
+
+
+	public function update_author_affiliation($aff_id, $data)
+
+	{
+
+		$this->db->where('aff_id', $aff_id);
+
+		$this->db->update(__TABLE_AUTHORS_AFF__, $data);
+	}
+
+
+
+	public function delete_author($auth_id, $data)
+
+	{
+
+		// UPDATE KEYWORD
+
+		$this->db->where('author_id', $auth_id);
+
+		$this->db->update(__TABLE_AUTHORS__, $data);
+	}
+
+
+
+	function search_author()
+
+	{
+
+
+
+
+
+		$btn_search_journal = $this->input->get_post('btn_search_journal');
+
+		if ($btn_search_journal) {
+
+			$search = array(
+				'journal_title' => trim($this->input->get_post('search_journal_title')),
+
+				'journal_code' => trim($this->input->get_post('search_journal_code')),
+
+				'journal_type' => trim($this->input->get_post('search_journal_type'))
+			);
+
+
+
+			$data['journals'] = $this->Journal->searchJournals($search);
+
+			$data['search_open'] = true;
+		} else {
+
+
+
+			redirect('/admin/Dashboard/manage_journals');
+		}
+
+
+
+		$data['is_admin'] = $is_admin;
+
+		$data['email'] = $this->session->userdata('email');
+
+		$data['name'] = $this->session->userdata('name');
+
+		$data['avatar'] = $this->session->userdata('avatar');
+
+		$data['field_of_expertise'] = $this->session->userdata('field_of_expertise');
+
+
+
+		$this->load->view('admin/manageJournals', $data);
+	}
+
+
+
+	public function update_author_sequence($ms_id, $auth_id, $auth_seq)
+
+	{
+
+		$data = array('sequence' => $auth_seq);
+
+		// UPDATE KEYWORD
+
+		$this->db->where('author_id', $auth_id);
+
+		$this->db->update(__TABLE_AUTHORS__, $data);
+	}
+
+
+	public function getLastAuhorsSequencesByMsid($ms_id)
+	{
+		$this->db->select('max(sequence) as last_sequence')->from(__TABLE_AUTHORS__);
+		$this->db->where('manuscript_id', $ms_id);
+		$this->db->where('status', 'A');
+		$this->db->order_by("sequence", "asc");
+		$author_seq = $this->db->get()->row();
+		return $author_seq;
+	}
+
+	public function getAuhorsByMsid($ms_id, $join = null, $param = null)
+	{
+		$this->db->from(__TABLE_AUTHORS__ . ' as a');
+
+		$this->db->select('*');
+
+		if (!empty($join['affiliation']) && $join['affiliation'] == 'left') {
+			$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'af.author_id = a.author_id', 'left');
+		} elseif (!empty($join['affiliation'])) {
+			$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'af.author_id = a.author_id', 'inner');
+		}
+
+		if (!empty($join['country']) && $join['country'] == 'left') {
+			$this->db->join(__TABLE_COUNTRY__ . ' as c', 'af.country = c.iso3', 'left');
+			$this->db->select('c.name as country_name');
+		} elseif (!empty($join['country'])) {
+			$this->db->join(__TABLE_COUNTRY__ . ' as c', 'af.country = c.iso3', 'inner');
+			$this->db->select('c.name as country_name');
+		}
+		if (!empty($join['develop_countries'])) {
+			$this->db->join(__TABLE_INSTITUTES_DEVELOPED_COUNTRIES__ . ' as dc', 'dc.iso = af.country', 'inner');
+		}
+		if (!empty($join['institute'])) {
+			$this->db->join(__TABLE_INSTITUTES__ . ' as ins', 'ins.institution_id = af.institution_id', 'inner');
+		}
+		if (is_array($ms_id)) {
+			$this->db->where_in('a.manuscript_id', $ms_id);
+		} else {
+			$this->db->where('a.manuscript_id', $ms_id);
+		}
+
+		if (isset($param['is_principal'])) {
+			$this->db->where('a.is_principal', 1);
+		}
+
+		if (isset($param['author_id'])) {
+			$this->db->where('a.author_id', $param['author_id']);
+		}
+
+		$this->db->where('a.status', 'A');
+
+		$this->db->order_by("a.sequence", "asc");
+
+		$authors = $this->db->get()->result();
+
+		return $authors;
+	}
+
+
+
+	public function getAuhorsByAuthorId($auth_id)
+
+	{
+
+		// Query to insert data in database
+
+		$this->db->from(__TABLE_AUTHORS__);
+
+		$this->db->where('author_id', $auth_id);
+
+		$this->db->where('status', 'A');
+
+		$this->db->order_by("sequence", "asc");
+
+		$author = $this->db->get()->result();
+
+		return $author;
+	}
+
+
+
+	public function getAssociateManuscriptByUserId($user_id)
+
+	{
+
+		// Query to insert data in database
+
+		$this->db->select('*')->from(__TABLE_ASSOCIATE__ . ' as au');
+
+		$this->db->join(__TABLE_MANUSCRIPT__ . ' as m', 'm.manuscript_id=au.manuscript_id', 'inner');
+
+		$this->db->join(__TABLE_JOURNALS__ . ' j ', ' j.journal_id = m.journal_id ', 'inner');
+
+		$this->db->where('au.user_id', $user_id);
+
+		$this->db->where('m.status', 'A');
+
+		$this->db->order_by("au.manuscript_id", "asc");
+
+		$assoc_manuscript_id = $this->db->get()->result();
+
+		return $assoc_manuscript_id;
+	}
+
+
+
+
+
+	function updateAuthorTable($condition, $data)
+
+	{
+
+		$this->db->where($condition);
+
+		$this->db->update(__TABLE_AUTHORS__, $data);
+	}
+
+
+
+	function searchAuthor($search)
+	{
+
+
+
+		$this->db->from(__TABLE_AUTHORS__);
+
+		$this->db->where('status', 'A');
+
+		$this->db->where($search);
+
+		$search_author = $this->db->get()->row();
+
+
+
+		if ($this->db->affected_rows() > 0) {
+
+			return $search_author;
+		} else {
+
+			return '';
+		}
+	}
+
+
+	/*
+
+		Date   :06-01-17
+
+		Author :Ishaq
+
+		Param  : add_author_aff
+
+		Desc   :this function update author by msid
+
+	*/
+
+
+
+
+
+	function UpdateAuthorByMsId($data, $manuscript_id)
+	{
+
+
+
+		$this->db->where('manuscript_id', $manuscript_id);
+		$this->db->where('is_principal=1');
+
+		return $this->db->update(__TABLE_AUTHORS__, $data);
+	}
+
+
+
+
+	public function GetContributors($manuscript_id, $contributor_id = null, $join = null)
+	{
+		$this->db->where('c.manuscript_id', $manuscript_id);
+		$this->db->select('c.*');
+
+		if (!empty($contributor_id)) {
+			$this->db->where('c.contributor_id', $contributor_id);
+		}
+
+		if (isset($join[__TABLE_USERS__]) && $join[__TABLE_USERS__] == 'LEFT') {
+			$this->db->join(__TABLE_USERS__ . ' u', ' u.user_id = c.decision_by ', 'LEFT');
+			$this->db->join(__TABLE_USERS_PROFILE__ . ' p', ' p.user_id = u.user_id ', 'LEFT');
+			$this->db->select(' concat(p.first_name," ",p.last_name) as decision_by');
+		}
+
+		if (isset($join[__TABLE_MANUSCRIPT__]) && $join[__TABLE_MANUSCRIPT__] == 'LEFT') {
+			$this->db->join(__TABLE_MANUSCRIPT__ . ' as m', 'm.contributor_id = c.contributor_id', 'LEFT');
+			$this->db->select('m.contributor_id as m_contributor_id');
+		}
+
+		if (isset($join[__TABLE_COUNTRY__]) && $join[__TABLE_COUNTRY__] == 'INNER') {
+			$this->db->join(__TABLE_COUNTRY__ . ' as cc', 'cc.iso3 = c.country', 'INNER');
+			$this->db->select('cc.nicename');
+		}
+
+		return $this->db->from(__TABLE_CONTRIBUTORS__ . ' as c')->order_by('sequence', 'asc')->get()->result();
+	}
+
+	public function AddContributors($data)
+	{
+		$this->db->insert(__TABLE_CONTRIBUTORS__, $data);
+		return $this->db->insert_id();
+
+		$this->db->select("update tbl_contributors set sequence = sequence + 1 where contributor_id = (select contributor_id from tbl_contributors where manuscript_id = $manuscript_id and contributor_id > $c_id order by contributor_id ASC limit 1) ");
+	}
+
+	public function UpdateContributors($where, $update)
+	{
+		if (isset($where['manuscript_id'])) {
+			$this->db->where('manuscript_id', $where['manuscript_id']);
+		}
+
+		if (isset($where['contributor_id'])) {
+			$this->db->where('contributor_id', $where['contributor_id']);
+		}
+
+		$this->db->update(__TABLE_CONTRIBUTORS__, $update);
+	}
+
+	public function DeleteContributorList($manuscript_id, $contributor_id)
+	{
+		$this->db->where('manuscript_id', $manuscript_id)->where('contributor_id', $contributor_id)->delete(__TABLE_CONTRIBUTORS__);
+	}
+
+	public function Sequencing($action, $manuscript_id, $up, $down = null)
+	{
+		if ($action == 'up' || $action == 'down') {
+			$up_sequence 	= $this->db->select('sequence')->from(__TABLE_CONTRIBUTORS__)->where('contributor_id', $up)->get()->row()->sequence;
+			$down_sequence 	= $this->db->select('sequence')->from(__TABLE_CONTRIBUTORS__)->where('contributor_id', $down)->get()->row()->sequence;
+
+			$this->db->update(__TABLE_CONTRIBUTORS__, array('sequence' => $down_sequence), array('contributor_id' => $up));
+			$this->db->update(__TABLE_CONTRIBUTORS__, array('sequence' => $up_sequence), array('contributor_id' => $down));
+		} elseif ($action == 'current') {
+			$seq = $this->db->from(__TABLE_CONTRIBUTORS__)->where('manuscript_id', $manuscript_id)->count_all_results();
+			$result = $this->db->update(__TABLE_CONTRIBUTORS__, array('sequence' => $seq), array('contributor_id' => $up));
+		}
+	}
+
+
+
+	public function ArrangeContributors($manuscript_id, $contributor_id, $value)
+	{
+		$this->db->update(__TABLE_CONTRIBUTORS__, array('sequence' => $value), array('manuscript_id' => $manuscript_id, 'contributor_id' => $contributor_id));
+	}
+
+
+	public function add_author_society($data)
+	{
+
+		$this->db->insert_batch(__TABLE_AUTHOR_SOCIETY__, $data);
+		$issue = $this->db->insert_id();
+		return $issue;
+	}
+
+	public function delete_author_society($auth_id)
+	{
+		$this->db->where('author_id', $auth_id)->delete(__TABLE_AUTHOR_SOCIETY__);
+	}
+
+	public function getSocietyByAuthorId($auth_id, $manuscript_id = '', $society_id = '', $join = '')
+	{
+		$this->db->select('*')->from(__TABLE_AUTHOR_SOCIETY__ . ' as s');
+
+		if (!empty($join)) {
+			$this->db->join(__TABLE_VIP_SOCIETY__ . ' as vip', 'vip.society_id = s.society_id', 'inner');
+		}
+
+		$this->db->where('s.author_id', $auth_id);
+
+		if (!empty($manuscript_id)) {
+			$this->db->where('s.manuscript_id', $manuscript_id);
+		}
+		if (!empty($society_id)) {
+			$this->db->where('s.society_id', $society_id);
+		}
+
+		$this->db->order_by('id', 'decs');
+
+		$society = $this->db->get()->result();
+
+		if ($this->db->affected_rows() > 0) {
+
+			return $society;
+		} else {
+
+			return false;
+		}
+	}
+
+	public function AuthorByManuscriptID($manuscript_id, $journal_id)
+	{
+		$this->db->select('m.manuscript_id, j.journal_id, a.first_name, a.last_name, a.email_address,
+												institution, department, IF (c.nicename IS NULL,af.country,c.nicename) AS country');
+		$this->db->from(__TABLE_MANUSCRIPT__ . ' as m');
+		$this->db->join(__TABLE_AUTHORS__ . ' as a', 'a.manuscript_id = m.manuscript_id', 'left');
+		$this->db->join(__TABLE_JOURNALS__ . ' as j', 'j.journal_id = m.journal_id', 'inner');
+		$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'af.author_id = a.author_id', 'left');
+		$this->db->join(__TABLE_COUNTRY__ . ' as c', 'c.iso3 = af.country', 'left');
+
+		$this->db->join('tbl_active_ebm as ebm', 'ebm.email = a.email_address AND executive_ge <> "Y" ', 'left');
+		$this->db->where("ebm.email", null);
+		$this->db->where("m.manuscript_type = 'M' ");
+		$this->db->where('a.is_principal = 1');
+		$this->db->where("m.status ='A'");
+		$this->db->where('j.journal_id', $journal_id);
+		$this->db->where('m.manuscript_id', $manuscript_id);
+		$this->db->where('c.iso3 NOT IN (SELECT iso3 FROM ' . __TABLE_BANNED_COUNTRY__ . ')');
+		$this->db->group_by("a.email_address ");
+		//echo $this->db->get_compiled_select();die();
+
+		$author_detail = $this->db->get()->row();
+
+		return $author_detail;
+	}
+
+	public function AuthorSubmissionHistory($ms_id, $count)
+	{
+
+		if ($count == 'Y') {
+			$end_query = 'GROUP BY aa.email_address
+			              HAVING total_count >= 3
+					      ORDER BY ma.`date_submitted` DESC';
+		} else {
+			$end_query = 'GROUP BY aa.manuscript_id,aa.email_address
+					      ORDER BY p.`is_principal` DESC, ma.date_submitted DESC';
+		}
+		$query =    "SELECT ma.reference_number,CONCAT(p.`first_name`,' ',p.`last_name`) AS author_name,aa.email_address,aa.is_principal,FROM_UNIXTIME(ma.date_submitted,'%d-%M-%Y') As submission_date,COUNT(DISTINCT ma.`manuscript_id`) as total_count,ma.`publish`,aa.h_index,
+			CONCAT(af.`institution`,',',af.`city`,',',ac.`nicename`) as auth_aff
+					FROM (
+					SELECT a.`email_address`,a.`is_principal`,a.first_name,a.`last_name` FROM tbl_authors AS a 
+					INNER JOIN tbl_manuscript AS m
+					ON a.`manuscript_id` = m.`manuscript_id` 
+					WHERE m.manuscript_id =" . $ms_id . " AND m.status='A' AND m.manuscript_type='M' AND a.status='A'
+					) AS p
+
+					INNER JOIN tbl_authors aa ON aa.email_address=p.email_address
+					INNER JOIN tbl_manuscript ma ON ma.`manuscript_id` = aa.manuscript_id
+					INNER JOIN tbl_author_affiliation af ON af.`author_id` = aa.`author_id`
+					INNER JOIN tbl_country ac ON ac.`iso3` = af.`country` 
+
+					WHERE aa.status='A' AND ma.status='A'
+					AND ma.submission_step= 0 AND ma.manuscript_type='M' 
+					AND ma.`manuscript_id` != " . $ms_id . "
+					AND  FROM_UNIXTIME( ma.`date_submitted`) > (NOW() - INTERVAL 12 MONTH)
+					";
+		$query .= $end_query;
+
+		$result = $this->db->query($query);
+
+		return $result->result();
+	}
+
+	public function GetAuthorDetailsbyEmail($email, $count = NULL, $limit = NULL, $start = NULL)
+	{
+		$this->db->select('m.manuscript_id,m.manuscript_type,a.is_principal,m.publish, a.first_name, a.last_name, a.email_address,af.*,
+		FROM_UNIXTIME(m.date_submitted,"%d-%M-%Y") As submission_date, a.h_index,m.reference_number,
+		IF (c.nicename IS NULL,af.country,c.nicename) AS country');
+		$this->db->from(__TABLE_MANUSCRIPT__ . ' as m');
+		$this->db->join(__TABLE_AUTHORS__ . ' as a', 'a.manuscript_id = m.manuscript_id', 'inner');
+		$this->db->join(__TABLE_AUTHORS_AFF__ . ' as af', 'af.author_id = a.author_id', 'inner');
+		$this->db->join(__TABLE_COUNTRY__ . ' as c', 'c.iso3 = af.country', 'inner');
+		$this->db->where('a.email_address', $email);
+
+		// echo $this->db->get_compiled_select();die();
+		if ($count == true) {
+			return $this->db->count_all_results();
+		} else {
+			$this->db->order_by("m.date_submitted", "desc");
+			if ($limit > 0) {
+				$this->db->limit($limit, $start);
+			}
+
+			$author_detail = $this->db->get()->result();
+			return $author_detail;
+		}
+	}
+}
